@@ -1,0 +1,4 @@
+{
+  "listing.description": "Pause timer with a Home-screen countdown widget. At zero it presses the media play/pause key (optionally activating a chosen window first), shuts the PC down, or puts it to sleep.",
+  "listing.name": "Sleep Pause Timer"
+}

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- Sleep Pause Timer: секундомер с кнопкой play/pause -->
+  <rect x="4" y="4" width="56" height="56" rx="14" fill="#1e293b"/>
+  <rect x="4" y="4" width="56" height="56" rx="14" fill="none" stroke="#8aa2ff" stroke-width="2.5"/>
+  <line x1="32" y1="6" x2="32" y2="14" stroke="#8aa2ff" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="32" cy="36" r="18" fill="none" stroke="#8aa2ff" stroke-width="3"/>
+  <path d="M 32 36 L 32 24" stroke="#e2e8f0" stroke-width="3" stroke-linecap="round"/>
+  <path d="M 32 36 L 41 41" stroke="#e2e8f0" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="32" cy="36" r="2.5" fill="#e2e8f0"/>
+  <path d="M 44 10 L 52 10 L 48 5 Z" fill="#8aa2ff"/>
+</svg>

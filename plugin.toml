@@ -1,0 +1,35 @@
+[plugin]
+id = "sleep-pause-timer"
+name = "Sleep Pause Timer"
+version = "0.1.0"
+description = "Pause timer with a Home-screen countdown widget. At zero it presses the media play/pause key (optionally activating a chosen window first), shuts the PC down, or puts it to sleep."
+author = "Voltur"
+license = "MIT"
+
+[entry]
+# `python` — известный демонстру рантайм: Астра сама находит Python (или
+# предложит установить), создаёт виртуальное окружение плагина из
+# requirements.lock и запускает код в нём. Это единственная форма, которую
+# принимает бандл .astraplugin (пути вида .venv/... или {venv}/... в него
+# не попадают).
+command = "python"
+args = ["-m", "src.plugin"]
+runtimes = ["python"]
+
+# `[capabilities]` — то, что демон может вызывать В плагине.
+[capabilities]
+tools = true
+ui_contributions = true
+
+# `[permissions]` — то, что плагин вызывает ИЗ демона. Пусто и это осознанно:
+# виджет сам опрашивает плагин через CallFromUi, инструменты вызывает демон,
+# никаких наружных действий над сессией пользователя плагин не совершает.
+[permissions]
+
+# Настройки — Астра сама рисует форму из этой JSON-схемы.
+[config]
+schema = '''{"type":"object","properties":{"default_action":{"type":"string","enum":["playpause","shutdown","sleep"],"default":"playpause","title":"Действие по завершении","description":"Что сделать, когда таймер дойдёт до нуля: нажать play/pause, выключить ПК или усыпить его"},"default_window":{"type":"string","default":"","title":"Окно для активации","description":"Подстрока заголовка окна или номер #N из list_windows — окно активируется перед нажатием media-клавиши"}},"additionalProperties":true}'''
+
+[platform]
+os = ["windows"]
+arch = ["x86_64"]
