@@ -74,3 +74,13 @@ astra-plugin build
 
 This produces a `.astraplugin` file for distribution.
 
+## Лицензия
+
+MIT © Voltur
+
+## Поддержать автора
+
+Если плагин оказался полезным, можно поддержать разработку:
+
+**[boosty.to/voltur/donate](https://boosty.to/voltur/donate)**
+
