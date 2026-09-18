@@ -16,7 +16,10 @@ import ctypes
 import json
 import threading
 import time
+import tkinter as tk
+from tkinter import filedialog
 
+from .alarm import AlarmEngine, AlarmError
 from astra_plugin_sdk import (
     BadArguments,
     Plugin,
@@ -434,13 +437,146 @@ class TimerEngine:
 
 
 class SleepPauseTimer(Plugin):
-    """Таймер паузы: инструменты для Астры + виджет отсчёта на главном экране."""
+    """Таймер и будильник: инструменты для Астры + виджеты на главном экране."""
 
-    def __init__(self):
+    def __init__(self, alarm_engine=None):
         super().__init__()
         self.engine = TimerEngine()
+        self.alarm = alarm_engine or AlarmEngine()
 
-    # ---------- настройки ----------
+    def _alarm_error(self, exc: AlarmError) -> BadArguments:
+        return BadArguments(str(exc))
+
+    @tool(
+        "Set a one-shot or daily Windows alarm that plays a local audio file. "
+        "Use for «поставь будильник», «разбуди меня в 7:30», «wake me at …». "
+        "Parameters: time (HH:MM format), sound_path (optional, uses saved melody if omitted), "
+        "repeat (true = daily, false = one time), interval (minutes between repeats, 1-60). "
+        "ALWAYS call this tool to actually set the alarm; never only say it is set."
+    )
+    async def set_alarm(
+        self,
+        time: str,
+        sound_path: str = "",
+        repeat: bool = True,
+        interval: int = 5,
+    ) -> dict:
+        await self._ensure_config()
+        try:
+            if ":" not in time:
+                raise AlarmError("Время должно быть в формате HH:MM")
+            hour_str, minute_str = time.split(":")[:2]
+            hour = int(hour_str)
+            minute = int(minute_str)
+            if not 0 <= hour <= 23 or not 0 <= minute <= 59:
+                raise AlarmError("Время должно быть в диапазоне 00:00–23:59")
+            interval = max(1, min(60, int(interval)))
+
+            if not sound_path:
+                sound_path = str(
+                    self.config.get("alarm_sound_path", "") or ""
+                ) or self.alarm.state()["sound_path"]
+            state = self.alarm.set_alarm(hour, minute, sound_path, repeat, interval)
+        except AlarmError as exc:
+            raise self._alarm_error(exc) from exc
+        except ValueError as exc:
+            raise self._alarm_error(AlarmError(f"Неверное время: {exc}")) from exc
+        await self.log_info(
+            "set_alarm: "
+            f"{state['next_time']}, repeat={state['repeat']}, interval={state.get('interval', 5)}, sound={state['sound_path']!r}"
+        )
+        return {
+            "message": (
+                f"Будильник установлен на {state['next_time']}"
+                + (" ежедневно" if state["repeat"] else " один раз")
+                + (f", повтор каждые {state['interval']} мин" if state.get('repeat') else "")
+                + f"; звук: {state['sound_name']}"
+            ),
+            "state": state,
+        }
+
+    @tool(
+        "Set or replace the local audio file used by the alarm. Use when the "
+        "user wants to choose a different local music file. Required: "
+        "sound_path, an absolute path to an existing local audio file."
+    )
+    async def set_alarm_sound(self, sound_path: str) -> dict:
+        try:
+            state = self.alarm.set_sound(sound_path)
+        except AlarmError as exc:
+            raise self._alarm_error(exc) from exc
+        return {
+            "message": f"Звук будильника: {state['sound_name']}",
+            "state": state,
+        }
+
+    @tool(
+        "Cancel the configured alarm without playing it. Use when the user asks "
+        "to turn off, cancel, or stop the alarm."
+    )
+    async def cancel_alarm(self) -> dict:
+        state = self.alarm.cancel()
+        await self.log_info(f"cancel_alarm -> {state['status']}")
+        return {
+            "message": "Будильник отменён" if state["status"] == "idle" else "Будильник остановлен",
+            "state": state,
+        }
+
+    @tool(
+        "Report the configured alarm: next time, whether it is active or playing, "
+        "repeat mode, interval between repeats, and the selected local audio file."
+    )
+    async def alarm_status(self) -> dict:
+        state = self.alarm.state()
+        if state["playing"]:
+            message = "Будильник играет"
+        elif state["scheduled"]:
+            message = f"Будильник установлен на {state['next_time']}"
+            if state["repeat"]:
+                message += f" ежедневно (каждые {state.get('interval', 5)} мин)"
+        else:
+            message = "Будильник не установлен"
+        if state["sound_path"]:
+            message += f"; звук: {state['sound_name']}"
+        state["message"] = message
+        return state
+
+    @tool(
+        "Stop the alarm sound now. Use when the user asks to stop, silence, or "
+        "dismiss the currently playing alarm."
+    )
+    async def stop_alarm_sound(self) -> dict:
+        state = self.alarm.stop_playback()
+        was_playing = state["outcome"] == "stopped"
+        await self.log_info(f"stop_alarm_sound -> {'stopped' if was_playing else 'idle'}")
+        return {
+            "message": "Звук будильника остановлен" if was_playing else "Будильник не играл",
+            "state": state,
+        }
+
+    @tool(
+        "Open a native Windows file picker and return the selected local audio "
+        "file path. Use when the user asks to choose a local music file for the "
+        "alarm. The user must select an existing audio file."
+    )
+    @ui_call
+    async def choose_alarm_sound(self) -> dict:
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            path = filedialog.askopenfilename(
+                parent=root,
+                title="Выберите музыку для будильника",
+                filetypes=[
+                    ("Аудиофайлы", "*.mp3;*.wav;*.wma;*.m4a;*.aac;*.flac;*.ogg;*.mid;*.midi"),
+                    ("Все файлы", "*.*"),
+                ],
+            )
+        finally:
+            root.destroy()
+        if not path:
+            return {"cancelled": True, "sound_path": ""}
+        return {"cancelled": False, "sound_path": path}
 
     async def _ensure_config(self):
         # Сервicer SDK ведёт self.config сам; подстраховка на случай, если
@@ -592,6 +728,30 @@ class SleepPauseTimer(Plugin):
         self.engine.cancel()
         return self.engine.state()
 
+    @ui_call
+    async def alarm_state(self):
+        return self.alarm.state()
+
+    @ui_call
+    async def alarm_cancel(self):
+        return self.alarm.cancel()
+
+    @ui_call
+    async def alarm_stop(self):
+        return self.alarm.stop_playback()
+
+    @ui_call
+    async def alarm_set(self, hour: int, minute: int, repeat: bool = True, interval: int = 5, sound_path: str = ""):
+        try:
+            if not str(sound_path or "").strip():
+                sound_path = self.alarm.state()["sound_path"]
+            state = self.alarm.set_alarm(
+                int(hour), int(minute), sound_path, bool(repeat), int(interval)
+            )
+        except (AlarmError, TypeError, ValueError) as exc:
+            return {"error": str(exc)}
+        return state
+
     # ---------- UI-вклад ----------
 
     async def get_ui_contributions(self) -> list[UiContribution]:
@@ -602,16 +762,34 @@ class SleepPauseTimer(Plugin):
                 id="timer-widget",
                 slot="home.widgets",
                 url="widget.html",
-                height=104,
+                height=140,
                 transparent=True,
                 pointer_events=True,
-            )
+            ),
+            UiContribution(
+                id="alarm-widget",
+                slot="home.widgets",
+                url="alarm-widget.html",
+                height=140,
+                transparent=True,
+                pointer_events=True,
+            ),
         ]
 
     # ---------- завершение ----------
 
     async def on_shutdown(self):
         self.engine.stop_thread()
+        self.alarm.stop_thread()
+
+    async def on_config_changed(self, config: dict):
+        self.config = config
+        sound_path = config.get("alarm_sound_path", "")
+        if sound_path:
+            try:
+                self.alarm.set_sound(sound_path)
+            except AlarmError:
+                pass
 
 
 if __name__ == "__main__":

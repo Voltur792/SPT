@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <script src="http://astra-plugin.localhost/bridge/astra-bridge.js"></script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sleep Pause Timer — Alarm</title>
+  <style>
+    :root {
+      color-scheme: normal;
+      --glass: color-mix(in srgb, var(--color-surface, #808080) 12%, transparent);
+      --glass-soft: color-mix(in srgb, var(--color-surface, #808080) 8%, transparent);
+      --glass-hover: color-mix(in srgb, var(--color-surface, #808080) 24%, transparent);
+      --stroke: var(--color-border, rgba(255, 255, 255, .09));
+      --stroke-strong: var(--edge-control, rgba(255, 255, 255, .16));
+      --focus-ring: var(--edge-focus, var(--color-accent, #8b5cf6));
+      --text: var(--color-text, #f7f6ff);
+      --text-soft: color-mix(in srgb, var(--color-text, #f7f6ff) 85%, transparent);
+      --muted: var(--color-text-muted, #89869b);
+      --accent: var(--color-accent, #8b5cf6);
+      --radius-card: 17px;
+      --radius-control: var(--radius-md, 13px);
+    }
+
+    body { color-scheme: light dark; }
+    html, body { background: transparent; }
+    * { scrollbar-width: none; }
+    *::-webkit-scrollbar { display: none; }
+  
+    html, body { width: 100%; height: 100%; margin: 0; }
+
+    body {
+      font-family: var(--font-sans, 'Segoe UI', system-ui, sans-serif);
+      color: var(--text);
+      user-select: none;
+      -webkit-user-select: none;
+      display: flex; 
+    }
+
+    .card, .activeCard, .idle {
+      box-sizing: border-box;
+      position: relative;
+      flex: 1 1 auto; 
+      width: 100%;
+      height: 100%;
+    
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 12px;
+      overflow: hidden; 
+    
+      border: 1px solid var(--stroke);
+      border-radius: var(--radius-card);
+      background:
+        linear-gradient(145deg, rgba(255, 255, 255, .04), transparent 42%),
+        var(--glass);
+      box-shadow: inset 0 1px rgba(255, 255, 255, .04);
+      transition: border-color .3s ease;
+    }
+    .card::before, .activeCard::before, .idle::before {
+      content: "";
+      position: absolute;
+      top: -1px;
+      left: 8%;
+      width: 45%;
+      height: 1px;
+      opacity: .65;
+      background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    }
+    .activeCard {
+    }
+    .card {
+    }
+    .idle {
+      color: var(--muted);
+      font-size: 11px;
+      background: var(--glass-soft);
+      box-shadow: inset 0 1px rgba(255, 255, 255, .03);
+    }
+    .idle span { text-align: center; line-height: 1.45; }
+    .time {
+      font-size: 22px;
+      font-weight: 700;
+      line-height: 1.1;
+      color: var(--text);
+      font-variant-numeric: tabular-nums;
+      letter-spacing: .5px;
+      text-shadow: 0 1px 8px rgba(0, 0, 0, .18);
+      transition: color .3s ease;
+    }
+    .time.playing { color: var(--accent); }
+
+    .meta {
+      margin-top: 1px;
+      font-size: 9px;
+      font-weight: 750;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .sound-info {
+      margin-top: 1px;
+      font-size: 8px;
+      font-weight: 500;
+      color: var(--text-soft);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .controls {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin-top: 4px;
+      width: 100%; 
+    }
+    .row {
+      display: flex;
+      gap: 5px;
+      align-items: center;
+      width: 100%;
+    }
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+      flex: 1;
+    }
+    .field label {
+      font-size: 7px;
+      font-weight: 600;
+      text-transform: uppercase;
+      color: var(--muted);
+      letter-spacing: .08em;
+    }
+    .field input, .field select {
+      background: var(--glass);
+      border: 1px solid var(--stroke);
+      border-radius: var(--radius-control);
+      color: var(--text);
+      padding: 4px 6px;
+      font-size: 10px;
+      font-family: inherit;
+      outline: none;
+      width: 100%;
+    }
+    .field input:focus, .field select:focus {
+      border-color: var(--focus-ring);
+    }
+
+    .btns { 
+      display: flex; 
+      gap: 4px; 
+      flex: 0 0 auto; 
+      width: 100%;
+      justify-content: center; 
+    }
+  
+    .btn {
+      box-sizing: border-box;
+      min-width: 32px;
+      height: 28px;
+      padding: 0 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      font-weight: 600;
+      border-radius: 999px;
+      border: 1px solid var(--stroke);
+      background: var(--glass-hover);
+      box-shadow: inset 0 1px rgba(255, 255, 255, .035);
+      color: var(--text-soft);
+      cursor: pointer;
+      outline: none;
+      transition: border-color .25s ease, background .25s ease, transform .25s ease;
+      flex: 1; 
+    }
+    .btn:hover {
+      transform: translateY(-1px);
+      border-color: var(--stroke-strong);
+      background: color-mix(in srgb, var(--color-surface, #808080) 34%, transparent);
+    }
+    .btn:focus-visible { box-shadow: 0 0 0 2px var(--focus-ring); }
+    .btn.danger:hover { border-color: rgba(255, 113, 133, .35); color: #ffc0ca; }
+    .btn.primary { background: var(--accent); color: #fff; border-color: transparent; }
+    .btn.primary:hover { background: color-mix(in srgb, var(--accent) 85%, #fff); }
+
+    .hidden { display: none; }
+  </style>
+
+</head>
+<body>
+  <div class="card hidden" id="card">
+    <div class="time" id="time">00:00</div>
+    <div class="meta" id="meta"></div>
+    <div class="sound-info" id="soundInfo"></div>
+    <div class="controls" id="controls" style="display:none;">
+      <div class="row">
+        <div class="field" style="flex:2;">
+          <label>Время</label>
+          <input type="time" id="alarmTime" step="60">
+        </div>
+        <div class="field" style="flex:1;">
+          <label>Повтор</label>
+          <select id="alarmRepeat">
+            <option value="true">Ежедневно</option>
+            <option value="false">Один раз</option>
+          </select>
+        </div>
+      </div>
+      <div class="row">
+        <div class="field" style="flex:1;">
+          <label>Интервал (мин)</label>
+          <input type="number" id="alarmInterval" min="1" max="60" value="5">
+        </div>
+        <div class="field" style="flex:1;">
+          <label>Мелодия</label>
+          <input type="text" id="alarmSoundPath" placeholder="Путь к файлу" readonly>
+        </div>
+        <button class="btn" id="btnChooseSound" style="height:32px; margin-top:1em;">Выбрать</button>
+      </div>
+      <div class="btns">
+        <button class="btn primary" id="btnSet">Установить</button>
+      </div>
+    </div>
+    <div class="btns hidden" id="btnsScheduled">
+      <button class="btn danger" id="btnCancelScheduled" title="Отменить будильник">✕</button>
+    </div>
+  </div>
+
+  <div class="activeCard hidden" id="activeCard">
+    <div class="time playing" id="activeTime">00:00</div>
+    <div class="meta" id="activeMeta"></div>
+    <div class="sound-info" id="activeSoundInfo"></div>
+    <div class="btns">
+      <button class="btn danger" id="btnStop" style="flex:1;" title="Стоп">⏹</button>
+      <button class="btn" id="btnCancelActive" style="flex:1;" title="Отмена">✕</button>
+    </div>
+  </div>
+
+  <div class="idle" id="idle"><span>Будильник не установлен — попросите Астру поставить будильник</span></div>
+
+  <script>
+    const call = (method, params) => {
+      const api = window.astra || window.__astraBridge || null;
+      const fn = api && (api.callBackend || api.call);
+      return fn ? fn.call(api, method, params)
+                : Promise.reject(new Error('bridge not ready'));
+    };
+
+    const el = {
+      card: document.getElementById('card'),
+      activeCard: document.getElementById('activeCard'),
+      idle: document.getElementById('idle'),
+      time: document.getElementById('time'),
+      meta: document.getElementById('meta'),
+      soundInfo: document.getElementById('soundInfo'),
+      controls: document.getElementById('controls'),
+      activeCard: document.getElementById('activeCard'),
+      activeTime: document.getElementById('activeTime'),
+      activeMeta: document.getElementById('activeMeta'),
+      activeSoundInfo: document.getElementById('activeSoundInfo'),
+      alarmTime: document.getElementById('alarmTime'),
+      alarmRepeat: document.getElementById('alarmRepeat'),
+      alarmInterval: document.getElementById('alarmInterval'),
+      alarmSoundPath: document.getElementById('alarmSoundPath'),
+      btnChooseSound: document.getElementById('btnChooseSound'),
+      btnSet: document.getElementById('btnSet'),
+      btnCancelScheduled: document.getElementById('btnCancelScheduled'),
+      btnStop: document.getElementById('btnStop'),
+      btnCancelActive: document.getElementById('btnCancelActive'),
+    };
+
+    function formatTime(seconds) {
+      const h = Math.floor(seconds / 3600);
+      const m = Math.floor((seconds % 3600) / 60);
+      const s = seconds % 60;
+      const pad = n => String(n).padStart(2, '0');
+      return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
+    }
+
+    function basename(path) {
+      if (!path) return '';
+      const i = path.lastIndexOf('\\');
+      return i >= 0 ? path.slice(i + 1) : path;
+    }
+
+    function render(s) {
+      if (!s) return;
+      const scheduled = !!s.scheduled;
+      const playing = !!s.playing;
+      const idle = !s.scheduled && !s.playing;
+
+      el.card.classList.toggle('hidden', !scheduled || playing);
+      el.activeCard.classList.toggle('hidden', !playing);
+      el.idle.classList.toggle('hidden', !idle);
+
+      document.getElementById('btnsScheduled').classList.toggle('hidden', !scheduled || playing);
+
+      if (playing) {
+        document.getElementById('activeTime').textContent = s.next_time || '\u266a';
+        document.getElementById('activeMeta').textContent = 'Будильник играет';
+        document.getElementById('activeSoundInfo').textContent = s.sound_name ? basename(s.sound_path) : '';
+      } else if (s.scheduled) {
+        document.getElementById('time').textContent = formatTime(s.remaining_seconds);
+        document.getElementById('meta').textContent = (s.repeat ? 'Ежедневно · ' : 'Один раз · ') + (s.next_time || '');
+        document.getElementById('soundInfo').textContent = s.sound_name ? basename(s.sound_path) : 'Мелодия не выбрана';
+        if (s.sound_path) {
+          document.getElementById('alarmSoundPath').value = s.sound_path;
+        }
+      }
+      if (typeof s.repeat === 'boolean') {
+        document.getElementById('alarmRepeat').value = s.repeat ? 'true' : 'false';
+      }
+      if (typeof s.interval === 'number') {
+        document.getElementById('alarmInterval').value = s.interval;
+      }
+    }
+
+    async function tick() {
+      try { render(await call('alarm_state', {})); } catch (e) { }
+    }
+
+    document.getElementById('btnSet').addEventListener('click', async () => {
+      const timeVal = document.getElementById('alarmTime').value;
+      if (!timeVal) return;
+      const [h, m] = timeVal.split(':').map(Number);
+      const repeat = document.getElementById('alarmRepeat').value === 'true';
+      const interval = parseInt(document.getElementById('alarmInterval').value, 10) || 5;
+      const soundPath = document.getElementById('alarmSoundPath').value;
+      try {
+        await call('alarm_set', { hour: h, minute: m, repeat, interval, sound_path: soundPath });
+      } catch (e) { console.error(e); }
+    });
+
+    document.getElementById('btnChooseSound').addEventListener('click', async () => {
+      try {
+        const res = await call('choose_alarm_sound', {});
+        if (!res.cancelled && res.sound_path) {
+          document.getElementById('alarmSoundPath').value = res.sound_path;
+        }
+      } catch (e) { console.error(e); }
+    });
+
+    document.getElementById('btnStop').addEventListener('click', async () => {
+      try { await call('alarm_stop', {}); } catch (e) {}
+    });
+
+    document.getElementById('btnCancelActive').addEventListener('click', async () => {
+      try { await call('alarm_cancel', {}); } catch (e) {}
+    });
+
+    document.getElementById('btnCancelScheduled').addEventListener('click', async () => {
+      try { await call('alarm_cancel', {}); } catch (e) {}
+    });
+
+    for (const [node, fn] of [[document.getElementById('btnStop'), () => document.getElementById('btnStop').click()],
+                               [document.getElementById('btnCancelActive'), () => document.getElementById('btnCancelActive').click()],
+                               [document.getElementById('btnCancelScheduled'), () => document.getElementById('btnCancelScheduled').click()]]) {
+      node.addEventListener('keydown', ev => {
+        if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); fn(); }
+      });
+    }
+
+    tick();
+    setInterval(tick, 500);
+  </script>
+</body>
+</html>

@@ -1,7 +1,7 @@
 [plugin]
 id = "sleep-pause-timer"
 name = "Sleep Pause Timer"
-version = "0.1.0"
+version = "0.2.5"
 description = "Pause timer with a Home-screen countdown widget. At zero it presses the media play/pause key (optionally activating a chosen window first), shuts the PC down, or puts it to sleep."
 author = "Voltur"
 license = "MIT"
@@ -28,7 +28,7 @@ ui_contributions = true
 
 # Настройки — Астра сама рисует форму из этой JSON-схемы.
 [config]
-schema = '''{"type":"object","properties":{"default_action":{"type":"string","enum":["playpause","shutdown","sleep"],"default":"playpause","title":"Действие по завершении","description":"Что сделать, когда таймер дойдёт до нуля: нажать play/pause, выключить ПК или усыпить его"},"default_window":{"type":"string","default":"","title":"Окно для активации","description":"Подстрока заголовка окна или номер #N из list_windows — окно активируется перед нажатием media-клавиши"}},"additionalProperties":true}'''
+schema = '''{"type":"object","properties":{"default_action":{"type":"string","enum":["playpause","shutdown","sleep"],"default":"playpause","title":"Действие по завершении таймера","description":"Что сделать, когда таймер дойдёт до нуля: нажать play/pause, выключить ПК или усыпить его"},"default_window":{"type":"string","default":"","title":"Окно для активации","description":"Подстрока заголовка окна или номер #N из list_windows — окно активируется перед нажатием media-клавиши"},"alarm_sound_path":{"type":"string","default":"","title":"Мелодия будильника","description":"Полный путь к аудиофайлу (MP3, WAV, WMA, M4A, AAC, MIDI) для будильника"},"alarm_repeat":{"type":"boolean","default":true,"title":"Повторять ежедневно","description":"Если включено, будильник срабатывает каждый день в заданное время"}},"additionalProperties":true}'''
 
 [platform]
 os = ["windows"]
