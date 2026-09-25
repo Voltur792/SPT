@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <script src="http://astra-plugin.localhost/bridge/astra-bridge.js"></script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Таймер паузы · Управление</title>
+  <style>
+    :root{
+      color-scheme:light dark;
+      --surface:color-mix(in srgb,var(--color-surface,#34364a) 68%,transparent);
+      --surface-2:color-mix(in srgb,var(--color-surface,#34364a) 42%,transparent);
+      --line:var(--color-border,rgba(255,255,255,.14));
+      --text:var(--color-text,#f4f3ff);--muted:var(--color-text-muted,#aaa8bd);
+      --accent:var(--color-accent,#8c6bff);--action:#6542d5;--action-hover:#7656e9;--focus:var(--edge-focus,#b6a2ff);
+      --good:#57d6a0;--bad:#ff7088;--radius:16px
+    }
+    *{box-sizing:border-box} html,body{min-height:100%;margin:0;background:transparent;color:var(--text)}
+    body{font:14px/1.45 var(--font-sans,'Segoe UI',system-ui,sans-serif);padding:22px;}
+    .shell{max-width:1040px;margin:auto}.head{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;margin:0 0 20px}
+    h1{font-size:25px;line-height:1.1;margin:0;font-weight:720;letter-spacing:-.035em}
+    .subtitle{color:var(--muted);margin:6px 0 0}.status{color:var(--muted);font-size:12px;text-align:right}
+    .tabs{display:flex;gap:6px;overflow:auto;padding:5px;margin-bottom:16px;border:1px solid var(--line);border-radius:14px;background:var(--surface-2)}
+    .tab{white-space:nowrap;border:0;border-radius:10px;padding:9px 14px;background:transparent;color:color-mix(in srgb,var(--text) 78%,var(--muted));font:inherit;font-weight:650;cursor:pointer;transition:background .16s,color .16s,box-shadow .16s}
+    .tab:hover{background:color-mix(in srgb,var(--accent) 15%,transparent);color:var(--text)}
+    .tab[aria-selected=true]{background:var(--action);color:#fff;box-shadow:inset 0 0 0 1px rgba(210,195,255,.52),0 4px 12px rgba(92,55,190,.2)}
+    .panel{display:none}.panel.active{display:block}.grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:14px}
+html.list-scroll-mode,body.list-scroll-mode{height:100%;min-height:0;overflow:hidden}
+body.list-scroll-mode{display:flex;flex-direction:column}
+body.list-scroll-mode .shell{width:100%;height:100%;min-height:0;display:flex;flex-direction:column}
+.list-scroll-mode .head,.list-scroll-mode .tabs{flex:0 0 auto}
+.list-scroll-mode .panel.active{display:flex;flex:1 1 auto;flex-direction:column;min-height:0;overflow:hidden}
+.list-scroll-mode .grid{flex:1 1 auto;min-height:0;grid-template-rows:minmax(0,1fr);overflow:hidden}
+.list-scroll-mode .card{min-height:0}
+.list-scroll-mode .alarm-state-card,.list-scroll-mode .upcoming-card{display:flex;flex-direction:column;min-height:0}
+.list-scroll-mode .calendar-card{display:flex;flex-direction:column;min-height:0}
+.list-scroll-mode .calendar-card .hint{margin-bottom:8px}
+.list-scroll-mode .calendar-card .calendar-summary{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;flex:0 0 auto;max-height:clamp(42px,10vh,76px);overflow:hidden;margin-bottom:8px;padding:8px 10px}
+.list-scroll-mode .calendar-card .calendar-head{flex:0 0 auto;margin:4px 0 6px}
+.list-scroll-mode .calendar-card .calendar{flex:1 1 auto;min-height:0;grid-template-columns:repeat(7,minmax(0,1fr));grid-auto-rows:minmax(0,1fr);gap:clamp(2px,.55vh,6px)}
+.list-scroll-mode .calendar-card .weekday{padding:2px 1px;font-size:clamp(9px,1.1vh,11px)}
+.list-scroll-mode .calendar-card .calday{height:100%;min-height:0;padding:clamp(2px,.6vh,6px);font-size:clamp(9px,1.2vh,13px);overflow:hidden}
+.list-scroll-mode .calendar-card .calday.marked small{min-width:0;overflow:hidden;text-overflow:ellipsis;padding:1px 3px;font-size:clamp(8px,1.05vh,10px)}
+.list-scroll-mode .calendar-card .notice{flex:0 0 auto;margin-top:6px}
+.list-scroll-mode .alarm-date-list,.list-scroll-mode .alarm-list{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;align-content:start;grid-auto-rows:max-content;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:color-mix(in srgb,var(--accent) 55%,var(--line)) transparent}
+.list-scroll-mode .alarm-date-list::-webkit-scrollbar,.list-scroll-mode .alarm-list::-webkit-scrollbar{width:8px}
+.list-scroll-mode .alarm-date-list::-webkit-scrollbar-track,.list-scroll-mode .alarm-list::-webkit-scrollbar-track{background:transparent}
+.list-scroll-mode .alarm-date-list::-webkit-scrollbar-thumb,.list-scroll-mode .alarm-list::-webkit-scrollbar-thumb{border:2px solid transparent;border-radius:8px;background:color-mix(in srgb,var(--accent) 58%,var(--line));background-clip:padding-box}
+    .card{grid-column:span 6;position:relative;overflow:hidden;border:1px solid var(--line);border-radius:var(--radius);padding:18px;background:linear-gradient(135deg,color-mix(in srgb,var(--accent) 8%,transparent),transparent 52%),var(--surface);box-shadow:inset 0 1px rgba(255,255,255,.045)}
+    .calendar-card{grid-column:span 8}.upcoming-card{grid-column:span 4}
+    .card.wide{grid-column:span 12}.card.third{grid-column:span 4}.card h2{font-size:16px;margin:0 0 4px;letter-spacing:-.015em}.hint{color:var(--muted);font-size:12px;margin:0 0 15px}
+    .row{display:flex;align-items:end;gap:10px;flex-wrap:wrap;margin:10px 0}.field{display:flex;flex:1 1 125px;min-width:100px;flex-direction:column;gap:5px}.field label,.label{font-size:11px;color:var(--muted);font-weight:650;letter-spacing:.025em}
+    input,select{width:100%;min-height:39px;border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:var(--surface-2);color:var(--text);font:inherit;outline:none}
+    select{color-scheme:dark}select option{background:#25264f;color:#f4f3ff}
+    input:focus,select:focus,button:focus-visible{border-color:var(--focus);box-shadow:0 0 0 2px color-mix(in srgb,var(--focus) 34%,transparent)}
+    input[type=checkbox]{width:16px;min-height:16px;accent-color:var(--accent)}
+    .days{display:flex;gap:6px;flex-wrap:wrap}.day{display:flex;align-items:center;gap:5px;padding:6px 8px;border:1px solid var(--line);border-radius:9px;color:var(--muted);font-size:12px}
+    button{min-height:38px;border:1px solid var(--line);border-radius:10px;padding:8px 13px;background:var(--surface-2);color:var(--text);font:inherit;font-weight:650;cursor:pointer;transition:transform .16s,border-color .16s,background .16s}
+    button:hover{transform:translateY(-1px);border-color:color-mix(in srgb,var(--accent) 60%,var(--line));background:color-mix(in srgb,var(--accent) 16%,var(--surface-2))}
+    button.primary{background:var(--action);border-color:rgba(190,170,255,.45);color:#fff;box-shadow:0 5px 16px rgba(92,55,190,.24)}button.primary:hover{background:var(--action-hover);border-color:rgba(215,200,255,.7)}button.danger{color:var(--bad)}button.small{min-height:30px;padding:4px 9px;font-size:12px}
+    .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}.metric{font-size:31px;font-variant-numeric:tabular-nums;font-weight:740;letter-spacing:-.04em}.meta{color:var(--muted);font-size:12px}
+    .calendar-head{display:flex;align-items:center;justify-content:space-between;margin:6px 0 12px}.calendar-head strong{font-size:16px}.calendar{display:grid;grid-template-columns:repeat(7,minmax(36px,1fr));gap:6px}.weekday{text-align:center;color:var(--muted);font-size:11px;padding:5px}
+    .calendar-summary{margin:0 0 12px;padding:10px 12px;border:1px solid color-mix(in srgb,var(--accent) 38%,var(--line));border-radius:11px;background:color-mix(in srgb,var(--accent) 13%,var(--surface-2));font-size:12px;color:var(--text)}
+    .calday.marked>span{display:grid;place-items:center;min-width:23px;height:23px;padding:0 4px;border-radius:50%;background:var(--action);color:#fff;font-weight:800;box-shadow:0 2px 8px rgba(92,55,190,.35)}
+    .calday{height:62px;min-width:0;padding:6px;display:flex;flex-direction:column;align-items:flex-start;justify-content:space-between;font-size:13px}.calday.today{outline:1px solid var(--focus)}.calday.marked{background:color-mix(in srgb,var(--accent) 24%,var(--surface-2));border-color:color-mix(in srgb,var(--accent) 68%,var(--line));box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 20%,transparent)}.calday.marked small{max-width:100%;padding:2px 5px;border-radius:5px;background:var(--action);color:#fff;font-size:10px;font-weight:750;white-space:nowrap}.calday:disabled{opacity:.25;cursor:default}
+    .alarm-list{display:grid;gap:6px;margin-top:12px}.alarm-row{display:flex;align-items:center;justify-content:space-between;gap:12px;height:64px;min-height:64px;padding:9px 11px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2)}.alarm-row>span{min-width:0;overflow:hidden}.alarm-row>span strong,.alarm-row>span small{display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}.alarm-row .cancel-date{display:grid;place-items:center;align-self:center;justify-self:center;flex:0 0 32px;width:32px;height:32px;min-height:32px;padding:0;font-size:20px;line-height:1;color:var(--bad)}
+    .alarm-row .cancel-date>span{display:block;transform:translateY(-1px)}
+    .alarm-row .cancel-date:hover{transform:none}.alarm-date-list{display:grid;gap:7px;margin-top:16px}.alarm-date-list:empty{display:none}.alarm-list-heading{margin:0 0 2px;color:var(--text);font-size:12px;font-weight:700}
+    .empty{color:var(--muted);text-align:center;padding:28px 12px;border:1px dashed var(--line);border-radius:12px}
+    .notice{min-height:20px;margin-top:10px;color:var(--muted);font-size:12px}.notice.error{color:var(--bad)}.notice.ok{color:var(--good)}
+    .dot{display:inline-block;width:8px;height:8px;margin-right:7px;border-radius:50%;background:var(--muted)}.dot.on{background:var(--good);box-shadow:0 0 10px color-mix(in srgb,var(--good) 65%,transparent)}
+    .modal{position:fixed;inset:0;display:none;place-items:center;background:rgba(4,6,15,.6);padding:18px;z-index:5}.modal.open{display:grid}.dialog{width:min(380px,100%);padding:20px;border:1px solid var(--line);border-radius:18px;background:var(--color-surface,#24263a);box-shadow:0 22px 80px rgba(0,0,0,.35)}
+    @media(max-width:760px){body{padding:14px}.card,.card.third,.calendar-card,.upcoming-card{grid-column:span 12}.head{align-items:flex-start;flex-direction:column}.status{text-align:left}.calday{height:52px;padding:4px;font-size:12px}.calendar{gap:4px}}
+    @media(max-height:560px){
+      .list-scroll-mode .calendar-card .calday{flex-direction:row;align-items:center;justify-content:flex-start;gap:2px;padding:1px 3px;line-height:1;overflow:hidden;white-space:nowrap}
+      .list-scroll-mode .calendar-card .calday.marked>span{min-width:16px;height:16px;padding:0 2px;font-size:clamp(8px,1vh,10px);line-height:1}
+      .list-scroll-mode .calendar-card .calday.marked small{flex:0 1 auto;min-width:0;max-width:calc(100% - 20px);overflow:hidden;text-overflow:ellipsis;padding:1px 2px;font-size:clamp(7px,.95vh,9px);line-height:1}
+    }
+  </style>
+</head>
+<body>
+<main class="shell">
+  <header class="head"><div><h1>Таймер паузы</h1><p class="subtitle">Таймеры, расписание и локальные действия Windows</p></div><div class="status" id="globalStatus">Подключение к Astra…</div></header>
+  <nav class="tabs" role="tablist" aria-label="Разделы"><button class="tab" role="tab" aria-selected="true" data-tab="timer">Таймер</button><button class="tab" role="tab" aria-selected="false" data-tab="alarm">Будильник</button><button class="tab" role="tab" aria-selected="false" data-tab="calendar">Календарь</button><button class="tab" role="tab" aria-selected="false" data-tab="settings">Настройки</button></nav>
+
+  <section class="panel active" id="panel-timer"><div class="grid">
+    <article class="card"><h2>Обратный отсчёт</h2><p class="hint">По окончании сработает выбранное действие.</p>
+      <div class="row"><div class="field"><label for="hours">Часы</label><input id="hours" type="number" min="0" max="999" value="0"></div><div class="field"><label for="minutes">Минуты</label><input id="minutes" type="number" min="0" max="59" value="5"></div><div class="field"><label for="seconds">Секунды</label><input id="seconds" type="number" min="0" max="59" value="0"></div></div>
+      <div class="row"><div class="field"><label for="timerAction">Действие</label><select id="timerAction"><option value="playpause">Медиа: пауза / продолжить</option><option value="shutdown">Выключить компьютер</option><option value="sleep">Спящий режим</option></select></div></div>
+      <div class="row"><div class="field"><label for="timerWindow">Окно перед отправкой клавиши</label><select id="timerWindow"><option value="">Не активировать окно</option></select></div><button id="refreshWindows" class="small">Обновить окна</button></div>
+      <div class="actions"><button id="timerStart" class="primary">Запустить</button><button id="timerPause">Пауза</button><button id="timerCancel" class="danger">Отменить</button></div><div class="notice" id="timerNotice"></div>
+    </article>
+    <article class="card"><h2>Состояние таймера</h2><p class="hint">Отсчёт продолжится в фоне, пока Astra оставляет плагин запущенным.</p><div class="metric" id="timerReadout">—</div><div class="meta" id="timerMeta">Таймер не запущен</div></article>
+  </div></section>
+
+  <section class="panel" id="panel-alarm"><div class="grid">
+    <article class="card"><h2>Повторяющийся будильник</h2><p class="hint">Выберите дни, мелодию и интервал повтора звонка.</p>
+      <div class="row"><div class="field"><label for="alarmTime">Время</label><input id="alarmTime" type="time" value="07:30"></div><div class="field"><label for="alarmRepeat">Расписание</label><select id="alarmRepeat"><option value="true">Повторять</option><option value="false">Один раз</option></select></div><div class="field"><label for="alarmInterval">Повтор звонка, мин</label><input id="alarmInterval" type="number" min="1" max="60" value="5"></div></div>
+      <div class="label">Дни недели</div><div class="days" id="days"></div>
+      <div class="row"><div class="field"><label for="soundPath">Локальный аудиофайл</label><input id="soundPath" placeholder="Выберите аудиофайл" readonly></div><button id="chooseSound">Выбрать</button></div>
+      <div class="actions"><button id="saveAlarm" class="primary">Установить</button><button id="cancelAlarm" class="danger">Отменить расписание</button><button id="stopAlarm">Остановить звонок</button></div><div class="notice" id="alarmNotice"></div>
+    </article>
+    <article class="card alarm-state-card"><h2>Состояние будильника</h2><p class="hint">Месячные срабатывания настраиваются отдельно в календаре.</p><div class="metric" id="alarmReadout">—</div><div class="meta" id="alarmMeta">Будильник не установлен</div><div class="alarm-date-list" id="alarmDateList" aria-label="Будильники по датам"></div></article>
+  </div></section>
+
+  <section class="panel" id="panel-calendar"><div class="grid">
+    <article class="card calendar-card"><h2>Будильники по датам</h2><p class="hint">Нажмите дату, чтобы добавить или изменить разовое срабатывание.</p>
+      <div id="calendarSummary" class="calendar-summary" aria-live="polite">Загрузка расписания…</div><div class="calendar-head"><button id="prevMonth" aria-label="Предыдущий месяц">←</button><strong id="monthLabel"></strong><button id="nextMonth" aria-label="Следующий месяц">→</button></div><div class="calendar" id="calendarGrid"></div><div class="notice" id="calendarNotice"></div>
+    </article><article class="card upcoming-card"><h2>Установленные будильники</h2><p class="hint">Здесь можно быстро проверить и отменить будильник на любую дату.</p><div id="alarmList" class="alarm-list"></div></article>
+  </div></section>
+
+  <section class="panel" id="panel-settings"><div class="grid">
+    <article class="card"><h2>Поведение таймера</h2><p class="hint">Параметры сохраняются локально в папке данных плагина.</p><div class="row"><div class="field"><label for="defaultAction">Действие по умолчанию</label><select id="defaultAction"><option value="playpause">Медиа: пауза / продолжить</option><option value="shutdown">Выключить компьютер</option><option value="sleep">Спящий режим</option></select></div></div><div class="row"><div class="field"><label for="defaultWindow">Окно по умолчанию</label><input id="defaultWindow" placeholder="Например, YouTube"></div></div>
+      <div class="actions"><button id="saveSettings" class="primary">Сохранить</button><button id="refreshWindowsSettings">Список окон</button></div><div class="notice" id="settingsNotice"></div>
+    </article>
+    <article class="card"><h2>Действие при бездействии</h2><p class="hint">Движение мыши на любом мониторе и клавиатура сбрасывают отсчёт. Астре можно попросить перезапустить отсчёт с текущего момента; Telegram поддерживается, если интеграция передаёт сообщения ассистенту с доступом к инструментам плагинов.</p><div class="row"><div class="field"><label for="idleMinutes">Порог, минут</label><input id="idleMinutes" type="number" min="1" max="1440" value="30"></div><div class="field"><label for="idleAction">Действие</label><select id="idleAction"><option value="playpause">Медиа: пауза / продолжить</option><option value="shutdown">Выключить компьютер</option><option value="sleep">Спящий режим</option></select></div></div><div class="meta" id="idleStatus"><span class="dot"></span>Отслеживание выключено</div><div class="actions"><button id="idleStart" class="primary">Начать отслеживание</button><button id="idleStop" class="danger">Остановить</button></div><div class="notice" id="idleNotice"></div></article>
+  </div></section>
+</main>
+
+<div class="modal" id="alarmModal" role="dialog" aria-modal="true" aria-labelledby="modalTitle"><div class="dialog"><h2 id="modalTitle">Будильник на дату</h2><p class="hint" id="modalDate"></p><div class="field"><label for="monthlyTime">Время</label><input id="monthlyTime" type="time" value="07:30"></div><div class="actions"><button id="monthlySave" class="primary">Сохранить</button><button id="monthlyRemove" class="danger">Удалить</button><button id="monthlyClose">Закрыть</button></div><div class="notice" id="modalNotice"></div></div></div>
+
+<script>
+const api=window.astra||window.__astraBridge||null;
+const call=(name,args={})=>{const fn=api&&(api.callBackend||api.call);return fn?fn.call(api,name,args):Promise.reject(new Error('Нет соединения с Astra'));};
+const $=id=>document.getElementById(id), weekdays=['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];let currentMonth=new Date();currentMonth.setDate(1);let selectedDate='';let timerState=null;let refreshSequence=0;
+function notice(id,msg='',kind=''){const n=$(id);n.textContent=msg;n.className='notice '+kind;}
+function fmt(s){s=Math.max(0,Number(s)||0);const h=Math.floor(s/3600),m=Math.floor(s%3600/60),sec=s%60,p=n=>String(n).padStart(2,'0');return h?`${h}:${p(m)}:${p(sec)}`:`${p(m)}:${p(sec)}`;}
+document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{const tab=b.dataset.tab;document.querySelectorAll('.tab').forEach(t=>t.setAttribute('aria-selected',String(t===b)));document.querySelectorAll('.panel').forEach(p=>p.classList.toggle('active',p.id==='panel-'+tab));const localScroll=tab==='alarm'||tab==='calendar';document.documentElement.classList.toggle('list-scroll-mode',localScroll);document.body.classList.toggle('list-scroll-mode',localScroll);}));
+for(const [i,d] of weekdays.entries()){$('days').insertAdjacentHTML('beforeend',`<label class="day"><input type="checkbox" value="${i}" checked>${d}</label>`);}
+async function refreshWindows(){try{const r=await call('windows_list');const selects=[$('timerWindow')];for(const s of selects){const old=s.value;s.innerHTML='<option value="">Не активировать окно</option>';for(const title of r.windows||[]){const m=title.match(/^(#\d+) — (.*)$/);const o=document.createElement('option');o.value=m?m[1]:title;o.textContent=title;s.append(o);}s.value=old;}}catch(e){notice('timerNotice',e.message,'error');}}
+async function refresh(){const request=++refreshSequence;try{const [t,a,c,s]=await Promise.all([call('state'),call('alarm_state'),call('calendar_state'),call('settings_state')]);if(request!==refreshSequence)return;timerState=t;renderTimer(t);const calendar=mergeCalendarStates(c,s?.calendar);renderAlarm(a,calendar);renderCalendar(calendar,a);renderSettings(s);$('globalStatus').textContent='Синхронизация с плагином активна';}catch(e){if(request===refreshSequence)$('globalStatus').textContent='Ожидание соединения с плагином';}}function renderTimer(s){$('timerReadout').textContent=s.running?fmt(s.remaining_seconds):'—';$('timerMeta').textContent=!s.running?'Таймер не запущен':`${s.paused?'На паузе':'Идёт'} · ${({playpause:'Медиа play/pause',sleep:'Спящий режим',shutdown:'Выключение'})[s.action]||s.action}${s.window?' · '+s.window:''}`;$('timerPause').textContent=s.paused?'Продолжить':'Пауза';}
+function renderAlarm(s,calendarState){if(!document.activeElement.closest('#panel-alarm')){$('soundPath').value=s.sound_path||'';$('alarmTime').value=`${String(s.hour||7).padStart(2,'0')}:${String(s.minute||30).padStart(2,'0')}`;$('alarmRepeat').value=String(!!s.repeat);$('alarmInterval').value=s.interval||5;document.querySelectorAll('#days input').forEach(x=>x.checked=(s.days_of_week||[0,1,2,3,4,5,6]).includes(Number(x.value)));}$('alarmReadout').textContent=s.playing?'Звонит':s.scheduled?(s.next_time||'Установлен'):'—';const count=(calendarState?.alarms||[]).length;$('alarmMeta').textContent=s.playing?'Нажмите «Остановить звонок»':`${s.scheduled?`${s.repeat?'Повтор':'Ближайший'} · ${s.sound_name||'мелодия не выбрана'}`:'Будильник не установлен'}${count?` · Будущих дат: ${count}`:''}`;}
+function renderSettings(s){const q=s.settings||{};if(!document.activeElement.closest('#panel-settings')){$('defaultAction').value=q.default_action||'playpause';$('defaultWindow').value=q.default_window||'';$('timerAction').value=q.default_action||'playpause';$('timerWindow').value=q.default_window||'';$('idleMinutes').value=q.idle_minutes||30;$('idleAction').value=q.idle_action||'playpause';}const i=s.idle||{};$('idleStatus').innerHTML=`<span class="dot ${i.running?'on':''}"></span>${i.running?(i.warning?'Скоро будет выполнено действие':i.triggered?'Действие выполнено; ждём возвращения':'До действия '+fmt(i.remaining_seconds)):'Отслеживание выключено'}`;}
+function renderAlarmRows(target,alarms){
+  const list=$(target);
+  list.innerHTML='';
+  if(target==='alarmDateList'&&alarms.length){
+    const heading=document.createElement('div');
+    heading.className='alarm-list-heading';
+    heading.textContent='Все будущие даты · '+alarms.length;
+    list.append(heading);
+  }
+  for(const a of alarms){
+    const row=document.createElement('div');
+    row.className='alarm-row';
+    const label=document.createElement('span');
+    const strong=document.createElement('strong');
+    strong.textContent=new Date(a.date+'T12:00:00').toLocaleDateString('ru-RU',{weekday:'short',day:'numeric',month:'long',year:'numeric'});
+    const detail=document.createElement('small');
+    detail.className='meta';
+    detail.textContent=(a.source==='alarm'?'Разовый будильник':'Будильник календаря')+' · '+String(a.hour).padStart(2,'0')+':'+String(a.minute).padStart(2,'0');
+    label.append(strong,document.createElement('br'),detail);
+    const button=document.createElement('button');
+    button.className='small danger cancel-date';
+    button.setAttribute('aria-label','Отменить будильник '+a.date+' в '+String(a.hour).padStart(2,'0')+':'+String(a.minute).padStart(2,'0'));
+    button.title='Отменить это время';
+    const icon=document.createElement('span');
+    icon.setAttribute('aria-hidden','true');
+    icon.textContent='×';
+    button.append(icon);
+    button.addEventListener('click',()=>removeAlarm(a.date,a.source,a.hour,a.minute));
+    row.append(label,button);
+    list.append(row);
+  }
+}
+function mergeCalendarStates(primary,secondary){const entries=new Map();for(const state of [primary,secondary])for(const item of Array.isArray(state?.alarms)?state.alarms:[]){if(!item?.date)continue;const alarm={...item,source:item.source||'calendar',hour:Number(item.hour),minute:Number(item.minute)};const key=`${alarm.date}|${alarm.hour}|${alarm.minute}|${alarm.source}`;entries.set(key,alarm);}const alarms=[...entries.values()].sort((a,b)=>`${a.date}T${String(a.hour).padStart(2,'0')}:${String(a.minute).padStart(2,'0')}`.localeCompare(`${b.date}T${String(b.hour).padStart(2,'0')}:${String(b.minute).padStart(2,'0')}`));return {...primary,alarms,count:alarms.length};}
+function renderCalendar(s,alarmState){
+  const y=currentMonth.getFullYear(),m=currentMonth.getMonth(),today=new Date();
+  const alarms=(s.alarms||[]).map(a=>({...a,source:a.source||'calendar'}));
+  const stamp=String(alarmState?.next_datetime||alarmState?.next_time||'');
+  const match=stamp.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}):(\d{2})/);
+  if(alarmState?.scheduled&&alarmState.repeat===false&&match&&!alarms.some(a=>a.date===match[1]&&a.hour===Number(match[2])&&a.minute===Number(match[3]))){
+    alarms.push({date:match[1],hour:Number(match[2]),minute:Number(match[3]),source:alarmState.source==='calendar'?'calendar':'alarm'});
+  }
+  alarms.sort((a,b)=>(a.date+'T'+String(a.hour).padStart(2,'0')+':'+String(a.minute).padStart(2,'0')).localeCompare(b.date+'T'+String(b.hour).padStart(2,'0')+':'+String(b.minute).padStart(2,'0')));
+  $('monthLabel').textContent=new Intl.DateTimeFormat('ru-RU',{month:'long',year:'numeric'}).format(currentMonth);
+  const schedule=alarms.map(a=>new Date(a.date+'T12:00:00').toLocaleDateString('ru-RU',{day:'numeric',month:'long',year:'numeric'})+' · '+String(a.hour).padStart(2,'0')+':'+String(a.minute).padStart(2,'0')).join('  |  ');
+  $('calendarSummary').textContent=alarms.length?'Установлено будильников: '+alarms.length+'. Расписание: '+schedule:'Будильников по датам нет. Выберите дату, чтобы добавить разовое срабатывание.';
+  const grid=$('calendarGrid');
+  grid.innerHTML='';
+  weekdays.forEach(d=>{const e=document.createElement('div');e.className='weekday';e.textContent=d;grid.append(e);});
+  const byDate=new Map();
+  for(const alarm of alarms){const entries=byDate.get(alarm.date)||[];entries.push(alarm);byDate.set(alarm.date,entries);}
+  const offset=(new Date(y,m,1).getDay()+6)%7;
+  for(let i=0;i<offset;i++)grid.append(document.createElement('div'));
+  for(let d=1;d<=new Date(y,m+1,0).getDate();d++){
+    const dt=new Date(y,m,d),key=y+'-'+String(m+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');
+    const entries=byDate.get(key)||[];
+    const b=document.createElement('button');
+    b.className='calday'+(dt.toDateString()===today.toDateString()?' today':'')+(entries.length?' marked':'');
+    b.disabled=new Date(y,m,d,23,59)<today;
+    const times=entries.map(a=>String(a.hour).padStart(2,'0')+':'+String(a.minute).padStart(2,'0')).join(', ');
+    b.setAttribute('aria-label',entries.length?d+': установлены будильники '+times:d+': добавить будильник');
+    if(entries.length)b.title='Будильники: '+times;
+    b.innerHTML='<span>'+d+'</span>';
+    b.addEventListener('click',()=>openAlarm(key,entries));
+    grid.append(b);
+  }
+  if(s.playing)notice('calendarNotice','Сейчас звучит будильник. Остановить его можно в виджете на главной.','ok');
+  else if(s.error)notice('calendarNotice',s.error,'error');
+  else notice('calendarNotice');
+  if(!alarms.length)$('alarmList').innerHTML='<div class="empty">Пока нет будильников по датам.</div>';
+  else renderAlarmRows('alarmList',alarms);
+  renderAlarmRows('alarmDateList',alarms);
+}
+function openAlarm(day,existing=[]){
+  selectedDate=day;
+  const entries=(Array.isArray(existing)?existing:[]).filter(a=>a&&a.source==='calendar');
+  const dateLabel=new Date(day+'T12:00:00').toLocaleDateString('ru-RU',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+  const occupied=new Set(entries.map(a=>String(a.hour).padStart(2,'0')+':'+String(a.minute).padStart(2,'0')));
+  const now=new Date();
+  const todayKey=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0')+'-'+String(now.getDate()).padStart(2,'0');
+  let candidate=450;
+  if(day===todayKey)candidate=Math.max(candidate,now.getHours()*60+now.getMinutes()+5);
+  candidate=Math.ceil(candidate/5)*5;
+  for(let i=0;i<288;i++){
+    const total=(candidate+i*5)%1440;
+    const value=String(Math.floor(total/60)).padStart(2,'0')+':'+String(total%60).padStart(2,'0');
+    if(!occupied.has(value)&&(day!==todayKey||total>now.getHours()*60+now.getMinutes())){candidate=total;break;}
+  }
+  const suggested=String(Math.floor(candidate/60)).padStart(2,'0')+':'+String(candidate%60).padStart(2,'0');
+  $('modalDate').textContent=dateLabel+(entries.length?' · Уже установлено: '+entries.map(a=>String(a.hour).padStart(2,'0')+':'+String(a.minute).padStart(2,'0')).join(', '):'');
+  $('modalTitle').textContent='Добавить будильник';
+  $('monthlyTime').value=suggested;
+  $('monthlySave').textContent='Добавить';
+  $('monthlyRemove').hidden=true;
+  notice('modalNotice');
+  $('alarmModal').classList.add('open');
+}
+async function removeAlarm(day,source='calendar',hour=null,minute=null){
+  try{
+    const args={date:day,source};
+    if(hour!==null&&minute!==null){args.hour=hour;args.minute=minute;}
+    const r=await call('calendar_cancel',args);
+    if(r.error)throw Error(r.error);
+    notice('calendarNotice','Будильник отменён','ok');
+    await refresh();
+  }catch(e){notice('calendarNotice',e.message,'error');}
+}
+$('monthlySave').onclick=async()=>{const [hour,minute]=$('monthlyTime').value.split(':').map(Number);try{const r=await call('calendar_set',{date:selectedDate,hour,minute});if(r.error)throw Error(r.error);$('alarmModal').classList.remove('open');notice('calendarNotice','Сохранено','ok');await refresh();}catch(e){notice('modalNotice',e.message,'error');}};$('monthlyRemove').onclick=()=>removeAlarm(selectedDate).then(()=>$('alarmModal').classList.remove('open'));$('monthlyClose').onclick=()=>$('alarmModal').classList.remove('open');$('alarmModal').addEventListener('click',e=>{if(e.target===$('alarmModal'))$('alarmModal').classList.remove('open');});
+$('prevMonth').onclick=()=>{currentMonth.setMonth(currentMonth.getMonth()-1);refresh();};$('nextMonth').onclick=()=>{currentMonth.setMonth(currentMonth.getMonth()+1);refresh();};
+$('timerStart').onclick=async()=>{try{const r=await call('timer_start_local',{hours:Number($('hours').value)||0,minutes:Number($('minutes').value)||0,seconds:Number($('seconds').value)||0,action:$('timerAction').value,window:$('timerWindow').value});if(r.error)throw Error(r.error);renderTimer(r);notice('timerNotice','Таймер запущен','ok');}catch(e){notice('timerNotice',e.message,'error');}};$('timerPause').onclick=async()=>{try{const method=timerState?.paused?'resume':'pause';renderTimer(await call(method));}catch(e){notice('timerNotice',e.message,'error');}};$('timerCancel').onclick=async()=>{await call('cancel');notice('timerNotice','Таймер отменён','ok');refresh();};$('refreshWindows').onclick=refreshWindows;
+$('chooseSound').onclick=async()=>{try{const r=await call('alarm_sound_choose_local');if(r.sound_path){$('soundPath').value=r.sound_path;const saved=await call('alarm_sound_save',{sound_path:r.sound_path});if(saved.error)throw Error(saved.error);}}catch(e){notice('alarmNotice',e.message,'error');}};$('saveAlarm').onclick=async()=>{const [hour,minute]=$('alarmTime').value.split(':').map(Number),days=[...document.querySelectorAll('#days input:checked')].map(x=>Number(x.value));if(!days.length){notice('alarmNotice','Выберите хотя бы один день','error');return;}try{const r=await call('alarm_set',{hour,minute,repeat:$('alarmRepeat').value==='true',interval:Number($('alarmInterval').value)||5,sound_path:$('soundPath').value,days_of_week:days});if(r.error)throw Error(r.error);notice('alarmNotice','Расписание сохранено','ok');refresh();}catch(e){notice('alarmNotice',e.message,'error');}};$('cancelAlarm').onclick=async()=>{const r=await call('alarm_cancel');notice('alarmNotice',r.scheduled?'':'Повторяющийся будильник отменён','ok');refresh();};$('stopAlarm').onclick=async()=>{await call('alarm_stop');refresh();};
+$('saveSettings').onclick=async()=>{try{const r=await call('settings_save',{default_action:$('defaultAction').value,default_window:$('defaultWindow').value,idle_minutes:Number($('idleMinutes').value)||30,idle_action:$('idleAction').value});if(r.error)throw Error(r.error);notice('settingsNotice','Настройки сохранены локально','ok');}catch(e){notice('settingsNotice',e.message,'error');}};$('refreshWindowsSettings').onclick=async()=>{try{const r=await call('windows_list');const names=(r.windows||[]).map(x=>x.replace(/^#\d+ — /,''));$('defaultWindow').placeholder=names.slice(0,5).join(' · ')||'Открытые окна не найдены';notice('settingsNotice',`${names.length} окон доступно`,'ok');}catch(e){notice('settingsNotice',e.message,'error');}};$('idleStart').onclick=async()=>{try{const r=await call('idle_start',{minutes:Number($('idleMinutes').value),action:$('idleAction').value,window:$('defaultWindow').value});if(r.error)throw Error(r.error);notice('idleNotice','Отслеживание включено','ok');refresh();}catch(e){notice('idleNotice',e.message,'error');}};$('idleStop').onclick=async()=>{await call('idle_stop');notice('idleNotice','Отслеживание остановлено','ok');refresh();};
+refreshWindows();refresh();setInterval(refresh,1000);
+</script>
+</body>
+</html>

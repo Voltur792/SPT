@@ -6,7 +6,7 @@ import os
 import subprocess
 import sys
 import threading
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Callable
 
@@ -161,6 +161,7 @@ class AlarmEngine:
         self._minute = 0
         self._repeat = True
         self._interval = 5
+        self._days_of_week = list(range(7))
         self._sound_path = ""
         self._next_trigger: datetime | None = None
         self._outcome = ""
@@ -185,16 +186,24 @@ class AlarmEngine:
             interval = int(alarm.get("interval", 5))
             if interval < 1:
                 interval = 5
+            days = alarm.get("days_of_week", list(range(7)))
+            if (not isinstance(days, list) or not days
+                    or any(type(day) is not int or not 0 <= day <= 6 for day in days)):
+                raise ValueError("invalid days_of_week")
+            days = sorted(set(days))
         except (KeyError, TypeError, ValueError):
-            return
-        self._scheduled = True
-        self._hour = hour
-        self._minute = minute
-        self._repeat = repeat
-        self._interval = interval
-        self._next_trigger = self._next_occurrence(hour, minute)
-        self._info = "будильник восстановлен"
-        self._start_thread_locked()
+            hour = None
+        if hour is not None:
+            self._scheduled = True
+            self._hour = hour
+            self._minute = minute
+            self._repeat = repeat
+            self._interval = interval
+            self._days_of_week = days
+            self._next_trigger = self._next_occurrence(hour, minute)
+        if self._scheduled:
+            self._info = "будильник восстановлен"
+            self._start_thread_locked()
 
     def _next_occurrence(
         self,
@@ -211,7 +220,12 @@ class AlarmEngine:
         candidate = base.replace(hour=hour, minute=minute, second=0, microsecond=0)
         if candidate <= base:
             candidate += timedelta(days=1)
-        return candidate
+        days = getattr(self, "_days_of_week", list(range(7)))
+        for _ in range(7):
+            if candidate.weekday() in days:
+                return candidate
+            candidate += timedelta(days=1)
+        return base.replace(hour=hour, minute=minute, second=0, microsecond=0) + timedelta(days=1)
 
     def _payload_locked(self) -> dict:
         if not self._scheduled:
@@ -223,6 +237,7 @@ class AlarmEngine:
                 "minute": self._minute,
                 "repeat": self._repeat,
                 "interval": self._interval,
+                "days_of_week": getattr(self, "_days_of_week", list(range(7))),
             },
         }
 
@@ -239,13 +254,19 @@ class AlarmEngine:
         self._thread = thread
         thread.start()
 
-    def set_alarm(self, hour: int, minute: int, sound_path: str, repeat: bool = True, interval: int = 5) -> dict:
+    def set_alarm(self, hour: int, minute: int, sound_path: str, repeat: bool = True, interval: int = 5, days_of_week: list[int] | None = None) -> dict:
         normalized_path = normalize_sound_path(sound_path)
         hour = int(hour)
         minute = int(minute)
         if not 0 <= hour <= 23 or not 0 <= minute <= 59:
             raise AlarmError("Время будильника должно быть в диапазоне 00:00–23:59")
         interval = max(1, int(interval))
+        if days_of_week is None:
+            days_of_week = list(range(7))
+        if not isinstance(days_of_week, list) or not days_of_week or any(
+            type(day) is not int or not 0 <= day <= 6 for day in days_of_week
+        ):
+            raise AlarmError("Выберите дни недели (0=Пн, 6=Вс)")
         with self._condition:
             self._generation += 1
             try:
@@ -258,6 +279,7 @@ class AlarmEngine:
             self._minute = minute
             self._repeat = bool(repeat)
             self._interval = interval
+            self._days_of_week = sorted(set(days_of_week))
             self._sound_path = normalized_path
             self._next_trigger = self._next_occurrence(hour, minute)
             self._outcome = ""
@@ -448,6 +470,7 @@ class AlarmEngine:
             "minute": self._minute if self._scheduled else 0,
             "repeat": self._repeat,
             "interval": self._interval,
+            "days_of_week": list(self._days_of_week),
             "sound_path": self._sound_path,
             "sound_name": sound_name,
             "next_time": trigger.strftime("%H:%M") if trigger else "",

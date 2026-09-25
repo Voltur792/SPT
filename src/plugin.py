@@ -13,13 +13,18 @@ Astra показывает отсчёт (слот home.widgets).
 from __future__ import annotations
 
 import ctypes
+import base64
 import json
+import os
 import threading
 import time
 import tkinter as tk
+from pathlib import Path
 from tkinter import filedialog
 
 from .alarm import AlarmEngine, AlarmError
+from .calendar_alarms import CalendarAlarmEngine
+from .idle import IdleMonitor
 from astra_plugin_sdk import (
     BadArguments,
     Plugin,
@@ -109,7 +114,7 @@ def press_media_play_pause() -> None:
 
 def shutdown_pc() -> None:
     """Выключение ПК — как в оригинале (ExitWindowsEx)."""
-    ctypes.windll.kernel32.ExitWindowsEx(EWX_SHUTDOWN_FORCE, 0xFFFFFFFF)
+    ctypes.windll.user32.ExitWindowsEx(EWX_SHUTDOWN_FORCE, 0xFFFFFFFF)
 
 
 def sleep_pc() -> None:
@@ -443,6 +448,47 @@ class SleepPauseTimer(Plugin):
         super().__init__()
         self.engine = TimerEngine()
         self.alarm = alarm_engine or AlarmEngine()
+        self.calendar = CalendarAlarmEngine()
+        self.calendar.set_sound_provider(lambda: self.alarm.state().get("sound_path", ""))
+        self.idle = IdleMonitor(self.engine._execute)
+        self.local_settings = self._load_local_settings()
+
+    @staticmethod
+    def _local_settings_path() -> Path:
+        base = os.environ.get("APPDATA") or os.environ.get("LOCALAPPDATA") or str(Path.home())
+        return Path(base) / "sleep-pause-timer" / "settings.json"
+
+    def _load_local_settings(self) -> dict:
+        try:
+            data = json.loads(self._local_settings_path().read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except (OSError, ValueError, TypeError):
+            return {}
+
+    def _save_local_settings(self, settings: dict) -> dict:
+        action = str(settings.get("default_action", "playpause"))
+        if action not in ACTIONS:
+            raise ValueError("Неизвестное действие по умолчанию")
+        try:
+            minutes = max(1, min(1440, int(settings.get("idle_minutes", 30))))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Период бездействия должен быть числом") from exc
+        idle_action = str(settings.get("idle_action", action))
+        if idle_action not in ACTIONS:
+            raise ValueError("Неизвестное действие при бездействии")
+        saved = {
+            "default_action": action,
+            "default_window": str(settings.get("default_window", "") or "").strip(),
+            "idle_minutes": minutes,
+            "idle_action": idle_action,
+        }
+        path = self._local_settings_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(json.dumps(saved, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(path)
+        self.local_settings = saved
+        return saved
 
     def _alarm_error(self, exc: AlarmError) -> BadArguments:
         return BadArguments(str(exc))
@@ -460,6 +506,7 @@ class SleepPauseTimer(Plugin):
         sound_path: str = "",
         repeat: bool = True,
         interval: int = 5,
+        days_of_week: list[int] | None = None,
     ) -> dict:
         await self._ensure_config()
         try:
@@ -476,7 +523,7 @@ class SleepPauseTimer(Plugin):
                 sound_path = str(
                     self.config.get("alarm_sound_path", "") or ""
                 ) or self.alarm.state()["sound_path"]
-            state = self.alarm.set_alarm(hour, minute, sound_path, repeat, interval)
+            state = self.alarm.set_alarm(hour, minute, sound_path, repeat, interval, days_of_week)
         except AlarmError as exc:
             raise self._alarm_error(exc) from exc
         except ValueError as exc:
@@ -590,10 +637,12 @@ class SleepPauseTimer(Plugin):
                 pass
 
     def _default_action(self) -> str:
-        action = str(self.config.get("default_action", "") or "").strip().lower()
+        action = str(self.local_settings.get("default_action") or self.config.get("default_action", "") or "").strip().lower()
         return action if action in ACTIONS else "playpause"
 
     def _default_window(self) -> str:
+        if "default_window" in self.local_settings:
+            return str(self.local_settings.get("default_window") or "")
         return str(self.config.get("default_window", "") or "")
 
     # ---------- инструменты ----------
@@ -707,6 +756,105 @@ class SleepPauseTimer(Plugin):
             "hint": "Передайте '#N' или подстроку заголовка в start_timer(window=...)",
         }
 
+    @tool("Schedule a one-time local alarm on a calendar date. Use ISO date YYYY-MM-DD and local time HH:MM.")
+    async def set_monthly_alarm(self, date: str, time: str) -> dict:
+        try:
+            if not self.alarm.state().get("sound_path"):
+                raise AlarmError("Сначала выберите мелодию во вкладке «Будильник»")
+            alarm_date = __import__("datetime").date.fromisoformat(date)
+            parts = time.split(":")
+            if len(parts) != 2:
+                raise ValueError("time must be HH:MM")
+            state = self.calendar.set_alarm(alarm_date, int(parts[0]), int(parts[1]))
+        except (ValueError, TypeError, AlarmError) as exc:
+            raise BadArguments(str(exc)) from exc
+        return {"message": f"Будильник добавлен на {date} в {time}", "state": state}
+
+    @tool("Cancel the one-time calendar alarm for a date (YYYY-MM-DD).")
+    async def cancel_monthly_alarm(self, date: str) -> dict:
+        try:
+            day = __import__("datetime").date.fromisoformat(date)
+            state = self.calendar.set_alarm(day, None, None)
+        except (ValueError, TypeError, AlarmError) as exc:
+            raise BadArguments(str(exc)) from exc
+        return {"message": f"Будильник на {date} отменён", "state": state}
+
+    @tool("List upcoming one-time calendar alarms and the next scheduled date.")
+    async def calendar_alarm_status(self) -> dict:
+        return self.calendar.state()
+
+    @tool("Stop the currently playing one-time calendar alarm sound without changing other calendar entries.")
+    async def stop_calendar_alarm_sound(self) -> dict:
+        was_playing = bool(self.calendar.state().get("playing"))
+        self.calendar.stop_playback()
+        return {"message": "Календарный звонок остановлен" if was_playing else "Календарный звонок не звучит",
+                "state": self.calendar.state()}
+
+    @tool("Set the Windows inactivity threshold and start or restart monitoring. A request such as «Установи отслеживание бездействия на 40 минут» means call this tool with `minutes=40`. The required integer `minutes` is the number of minutes without input before the action runs. Optional `action` and `window` select what happens when the threshold is reached.")
+    async def start_idle_monitor(self, minutes: int, action: str = "", window: str = "") -> dict:
+        try:
+            minutes = int(minutes)
+        except (TypeError, ValueError) as exc:
+            raise BadArguments("Укажите порог бездействия в минутах") from exc
+        if not 1 <= minutes <= 1440:
+            raise BadArguments("Порог бездействия должен быть от 1 до 1440 минут")
+        act = (action or "").strip().lower() or str(self.local_settings.get("idle_action") or self._default_action())
+        target = (window or "").strip() or self._default_window()
+        if target and act != "playpause":
+            target = ""
+        try:
+            self.local_settings = self._save_local_settings({
+                **self.local_settings,
+                "default_action": self.local_settings.get("default_action") or self._default_action(),
+                "default_window": self.local_settings.get("default_window", self._default_window()),
+                "idle_minutes": minutes,
+                "idle_action": act,
+            })
+            state = self.idle.start(minutes, act, target)
+        except ValueError as exc:
+            raise BadArguments(str(exc)) from exc
+        except OSError as exc:
+            raise RuntimeError(f"Не удалось сохранить настройки отслеживания: {exc}") from exc
+        return {"message": f"Отслеживание бездействия запущено: {minutes} мин", "state": state}
+
+    @tool("Resume or restart Windows inactivity tracking from now. Keep the current duration and action, or use the saved inactivity settings if tracking is stopped. Use this when the user asks to resume/reset inactivity tracking in an Astra assistant conversation; Telegram can use it when its integration exposes plugin tools to the assistant.")
+    async def resume_idle_monitor(self) -> dict:
+        current = self.idle.state()
+        try:
+            configured_minutes = int(current.get("minutes") or 0)
+        except (TypeError, ValueError):
+            configured_minutes = 0
+        has_monitor_configuration = configured_minutes > 0
+        if has_monitor_configuration:
+            minutes = configured_minutes
+            action = str(current.get("action") or "").strip().lower()
+            window = str(current.get("window") or "")
+        else:
+            try:
+                minutes = int(self.local_settings.get("idle_minutes", 30))
+            except (TypeError, ValueError):
+                minutes = 30
+            action = str(self.local_settings.get("idle_action") or self._default_action()).strip().lower()
+            window = self._default_window()
+        minutes = max(1, min(1440, minutes))
+        if action not in ACTIONS:
+            action = self._default_action()
+        if action != "playpause":
+            window = ""
+        try:
+            state = self.idle.start(minutes, action, window)
+        except ValueError as exc:
+            raise BadArguments(str(exc)) from exc
+        return {"message": f"Отслеживание бездействия возобновлено. Новый отсчёт: {minutes} мин", "state": state}
+
+    @tool("Stop tracking Windows inactivity.")
+    async def stop_idle_monitor(self) -> dict:
+        return self.idle.stop()
+
+    @tool("Report Windows inactivity tracking status and time until the configured action.")
+    async def idle_status(self) -> dict:
+        return self.idle.state()
+
     # ---------- вызовы из виджета (CallFromUi) ----------
 
     @ui_call
@@ -730,39 +878,223 @@ class SleepPauseTimer(Plugin):
 
     @ui_call
     async def alarm_state(self):
-        return self.alarm.state()
+        daily = self.alarm.state()
+        monthly = self.calendar.state()
+        daily = dict(daily)
+        daily.update({
+            "calendar_count": monthly.get("count", 0),
+            "calendar_next": monthly.get("next"),
+            "calendar_remaining_seconds": monthly.get("remaining_seconds", 0),
+            "calendar_playing": monthly.get("playing"),
+        })
+        if monthly.get("playing"):
+            daily.update({
+                "scheduled": False,
+                "playing": True,
+                "source": "calendar",
+                "next_time": monthly["playing"],
+                "sound_name": "Календарный будильник",
+            })
+        elif monthly.get("next") and (
+            not daily.get("scheduled")
+            or monthly.get("remaining_seconds", 0) < daily.get("remaining_seconds", 0)
+        ):
+            upcoming = monthly["next"]
+            daily.update({
+                "scheduled": True,
+                "playing": False,
+                "source": "calendar",
+                "next_time": f"{upcoming['date']} {upcoming['hour']:02d}:{upcoming['minute']:02d}",
+                "remaining_seconds": monthly.get("remaining_seconds", 0),
+                "repeat": False,
+                "sound_name": "Календарный будильник",
+            })
+        else:
+            daily["source"] = "daily"
+        return daily
 
     @ui_call
     async def alarm_cancel(self):
-        return self.alarm.cancel()
+        monthly = self.calendar.state()
+        if monthly.get("playing"):
+            self.calendar.stop_playback()
+            return await self.alarm_state()
+        current = await self.alarm_state()
+        if current.get("source") == "calendar" and monthly.get("next"):
+            upcoming = monthly["next"]
+            self.calendar.set_alarm(
+                __import__("datetime").date.fromisoformat(upcoming["date"]), None, None
+            )
+            return await self.alarm_state()
+        self.alarm.cancel()
+        return await self.alarm_state()
 
     @ui_call
     async def alarm_stop(self):
-        return self.alarm.stop_playback()
+        monthly = self.calendar.state()
+        if monthly.get("playing"):
+            self.calendar.stop_playback()
+            return await self.alarm_state()
+        self.alarm.stop_playback()
+        return await self.alarm_state()
 
     @ui_call
-    async def alarm_set(self, hour: int, minute: int, repeat: bool = True, interval: int = 5, sound_path: str = ""):
+    async def alarm_set(self, hour: int, minute: int, repeat: bool = True, interval: int = 5,
+                        sound_path: str = "", days_of_week: list[int] | None = None):
         try:
             if not str(sound_path or "").strip():
                 sound_path = self.alarm.state()["sound_path"]
             state = self.alarm.set_alarm(
-                int(hour), int(minute), sound_path, bool(repeat), int(interval)
+                int(hour), int(minute), sound_path, bool(repeat), int(interval), days_of_week
             )
         except (AlarmError, TypeError, ValueError) as exc:
             return {"error": str(exc)}
         return state
+
+    @ui_call
+    async def calendar_state(self):
+        state = self.calendar.state()
+        alarms = [dict(item, source="calendar") for item in state.get("alarms", [])]
+        daily = self.alarm.state()
+        next_datetime = daily.get("next_datetime", "")
+        if daily.get("scheduled") and not daily.get("repeat") and next_datetime:
+            try:
+                at = __import__("datetime").datetime.fromisoformat(next_datetime)
+                alarms.append({
+                    "date": at.date().isoformat(), "hour": at.hour,
+                    "minute": at.minute, "source": "alarm",
+                })
+            except (TypeError, ValueError):
+                pass
+        alarms.sort(key=lambda item: (item["date"], item["hour"], item["minute"], item["source"]))
+        state["alarms"] = alarms
+        state["count"] = len(alarms)
+        state["next"] = alarms[0] if alarms else None
+        state["remaining_seconds"] = daily.get("remaining_seconds", 0) if (
+            daily.get("scheduled") and not daily.get("repeat")
+            and alarms and alarms[0].get("source") == "alarm"
+        ) else self.calendar.state().get("remaining_seconds", 0)
+        if daily.get("playing") and not daily.get("repeat"):
+            state["playing"] = "alarm"
+        return state
+
+    @ui_call
+    async def calendar_cancel(
+        self, date: str, source: str = "calendar",
+        hour: int | None = None, minute: int | None = None,
+    ):
+        try:
+            day = __import__("datetime").date.fromisoformat(date)
+            if source == "alarm":
+                daily = self.alarm.state()
+                stamp = str(daily.get("next_datetime", ""))
+                if daily.get("scheduled") and not daily.get("repeat") and stamp.startswith(date):
+                    at = __import__("datetime").datetime.fromisoformat(stamp)
+                    if hour is None or minute is None or (at.hour, at.minute) == (int(hour), int(minute)):
+                        self.alarm.cancel()
+            elif hour is not None and minute is not None:
+                self.calendar.cancel_alarm(day, int(hour), int(minute))
+            else:
+                self.calendar.set_alarm(day, None, None)
+            return await self.calendar_state()
+        except (AlarmError, ValueError, TypeError) as exc:
+            return {"error": str(exc)}
+
+    @ui_call
+    async def calendar_set(self, date: str, hour: int | None, minute: int | None):
+        try:
+            if hour is not None and minute is not None and not self.alarm.state().get("sound_path"):
+                return {"error": "Сначала выберите мелодию во вкладке «Будильник»"}
+            day = __import__("datetime").date.fromisoformat(date)
+            return self.calendar.set_alarm(day, hour, minute)
+        except (AlarmError, ValueError, TypeError) as exc:
+            return {"error": str(exc)}
+
+    @ui_call
+    async def calendar_stop(self):
+        self.calendar.stop_playback()
+        return self.calendar.state()
+
+    @ui_call
+    async def settings_state(self):
+        return {"settings": self.local_settings, "idle": self.idle.state(),
+                "alarm": self.alarm.state(), "calendar": self.calendar.state()}
+
+    @ui_call
+    async def settings_save(self, default_action: str, default_window: str = "",
+                            idle_minutes: int = 30, idle_action: str = "playpause"):
+        try:
+            return {"settings": self._save_local_settings({
+                "default_action": default_action, "default_window": default_window,
+                "idle_minutes": idle_minutes, "idle_action": idle_action,
+            })}
+        except (OSError, ValueError, TypeError) as exc:
+            return {"error": str(exc)}
+
+    @ui_call
+    async def idle_start(self, minutes: int, action: str, window: str = ""):
+        try:
+            self.local_settings = self._save_local_settings({
+                **self.local_settings,
+                "idle_minutes": minutes,
+                "idle_action": action,
+            })
+            return self.idle.start(minutes, action, window)
+        except (ValueError, OSError) as exc:
+            return {"error": str(exc)}
+
+    @ui_call
+    async def idle_stop(self):
+        return self.idle.stop()
+
+    @ui_call
+    async def windows_list(self):
+        return {"windows": self.engine.windows.list_windows()}
+
+    @ui_call
+    async def timer_start_local(self, hours: int, minutes: int, seconds: int,
+                                action: str, window: str = ""):
+        total = int(hours) * 3600 + int(minutes) * 60 + int(seconds)
+        if total <= 0:
+            return {"error": "Длительность должна быть больше нуля"}
+        if action not in ACTIONS:
+            return {"error": "Неизвестное действие"}
+        if not self.engine.start(total, action, window if action == "playpause" else ""):
+            return {"error": "Таймер уже запущен"}
+        return self.engine.state()
+
+    @ui_call
+    async def alarm_sound_choose_local(self):
+        return await self.choose_alarm_sound()
+
+    @ui_call
+    async def alarm_sound_save(self, sound_path: str):
+        try:
+            return self.alarm.set_sound(sound_path)
+        except AlarmError as exc:
+            return {"error": str(exc)}
 
     # ---------- UI-вклад ----------
 
     async def get_ui_contributions(self) -> list[UiContribution]:
         # Строим вручную, а не через @ui_slot: нужен transparent=True
         # (иначе Astra зальёт iframe непрозрачным фоном — «чёрный фон виджета»).
+        icon_path = Path(__file__).resolve().parent.parent / "icon.png"
+        try:
+            icon_data = base64.b64encode(icon_path.read_bytes()).decode("ascii")
+            page_icon = (
+                '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">'
+                f'<image width="512" height="512" href="data:image/png;base64,{icon_data}"/>'
+                '</svg>'
+            )
+        except OSError:
+            page_icon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l3 2M9 2h6M12 2v3"/></svg>'
         return [
             UiContribution(
                 id="timer-widget",
                 slot="home.widgets",
                 url="widget.html",
-                height=140,
+                height=120,
                 transparent=True,
                 pointer_events=True,
             ),
@@ -770,7 +1102,16 @@ class SleepPauseTimer(Plugin):
                 id="alarm-widget",
                 slot="home.widgets",
                 url="alarm-widget.html",
-                height=140,
+                height=120,
+                transparent=True,
+                pointer_events=True,
+            ),
+            UiContribution(
+                id="timer-settings-page",
+                slot="page.custom",
+                url="settings-v2.html",
+                label="Таймер паузы",
+                icon_svg=page_icon,
                 transparent=True,
                 pointer_events=True,
             ),
@@ -781,6 +1122,8 @@ class SleepPauseTimer(Plugin):
     async def on_shutdown(self):
         self.engine.stop_thread()
         self.alarm.stop_thread()
+        self.calendar.stop_thread()
+        self.idle.stop()
 
     async def on_config_changed(self, config: dict):
         self.config = config
@@ -794,4 +1137,3 @@ class SleepPauseTimer(Plugin):
 
 if __name__ == "__main__":
     SleepPauseTimer().run()
-

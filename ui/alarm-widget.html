@@ -18,6 +18,8 @@
       --text-soft: color-mix(in srgb, var(--color-text, #f7f6ff) 85%, transparent);
       --muted: var(--color-text-muted, #89869b);
       --accent: var(--color-accent, #8b5cf6);
+      --action: #6542d5;
+      --action-hover: #7656e9;
       --radius-card: 17px;
       --radius-control: var(--radius-md, 13px);
     }
@@ -48,8 +50,8 @@
       flex-direction: column;
       justify-content: center;
       align-items: center;
-      gap: 6px;
-      padding: 8px 12px;
+      gap: 4px;
+      padding: 5px 9px;
       overflow: hidden; 
     
       border: 1px solid var(--stroke);
@@ -190,8 +192,8 @@
     }
     .btn:focus-visible { box-shadow: 0 0 0 2px var(--focus-ring); }
     .btn.danger:hover { border-color: rgba(255, 113, 133, .35); color: #ffc0ca; }
-    .btn.primary { background: var(--accent); color: #fff; border-color: transparent; }
-    .btn.primary:hover { background: color-mix(in srgb, var(--accent) 85%, #fff); }
+    .btn.primary { background: var(--action); color: #fff; border-color: rgba(190,170,255,.45); box-shadow: 0 4px 12px rgba(92,55,190,.24); }
+    .btn.primary:hover { background: var(--action-hover); border-color: rgba(215,200,255,.7); }
 
     .hidden { display: none; }
   </style>
@@ -307,11 +309,13 @@
 
       if (playing) {
         document.getElementById('activeTime').textContent = s.next_time || '\u266a';
-        document.getElementById('activeMeta').textContent = 'Будильник играет';
+        document.getElementById('activeMeta').textContent = s.source === 'calendar' ? 'Календарный будильник · звонит' : 'Будильник играет';
         document.getElementById('activeSoundInfo').textContent = s.sound_name ? basename(s.sound_path) : '';
       } else if (s.scheduled) {
         document.getElementById('time').textContent = formatTime(s.remaining_seconds);
-        document.getElementById('meta').textContent = (s.repeat ? 'Ежедневно · ' : 'Один раз · ') + (s.next_time || '');
+        document.getElementById('meta').textContent = s.source === 'calendar'
+          ? `Скоро · ${s.next_time || ''}`
+          : (s.repeat ? 'Ежедневно · ' : 'Один раз · ') + (s.next_time || '');
         document.getElementById('soundInfo').textContent = s.sound_name ? basename(s.sound_path) : 'Мелодия не выбрана';
         if (s.sound_path) {
           document.getElementById('alarmSoundPath').value = s.sound_path;

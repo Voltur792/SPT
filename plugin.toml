@@ -1,7 +1,7 @@
 [plugin]
 id = "sleep-pause-timer"
 name = "Sleep Pause Timer"
-version = "0.2.6"
+version = "0.4.0"
 description = "Pause timer with a Home-screen countdown widget. At zero it presses the media play/pause key (optionally activating a chosen window first), shuts the PC down, or puts it to sleep."
 author = "Voltur"
 license = "MIT"

@@ -11,6 +11,7 @@ servicer, so a tool that is declared but not routed fails here.
 """
 
 import asyncio
+import base64
 import sys
 from pathlib import Path
 
@@ -44,6 +45,14 @@ EXPECTED_TOOLS = {
     "cancel_alarm",
     "stop_alarm_sound",
     "choose_alarm_sound",
+    "set_monthly_alarm",
+    "cancel_monthly_alarm",
+    "calendar_alarm_status",
+    "stop_calendar_alarm_sound",
+    "start_idle_monitor",
+    "resume_idle_monitor",
+    "stop_idle_monitor",
+    "idle_status",
 }
 
 
@@ -56,9 +65,83 @@ def test_tools_are_registered_with_matching_schemas():
         h.assert_schema_accepts(
             "start_timer", "hours", "minutes", "seconds", "action", "window"
         )
+        h.assert_schema_accepts("set_alarm", "time", "sound_path", "repeat", "interval", "days_of_week")
+        h.assert_schema_accepts("start_idle_monitor", "minutes", "action", "window")
+        assert h.schema("start_idle_monitor").get("required", []) == ["minutes"]
         # Все параметры опциональны — у каждого есть значение по умолчанию,
         # поэтому поля required в схеме нет вовсе.
         assert h.schema("start_timer").get("required", []) == []
+
+
+
+def test_resume_idle_monitor_tool_reuses_current_or_saved_configuration():
+    class IdleStub:
+        def __init__(self, state):
+            self.current = dict(state)
+            self.started = None
+
+        def state(self):
+            return dict(self.current)
+
+        def start(self, minutes, action, window):
+            self.started = (minutes, action, window)
+            self.current = {"running": True, "minutes": minutes,
+                            "action": action, "window": window}
+            return dict(self.current)
+
+    plugin = SleepPauseTimer()
+    plugin.local_settings = {
+        "idle_minutes": 18,
+        "idle_action": "sleep",
+        "default_window": "",
+    }
+    plugin.idle = IdleStub({"running": True, "minutes": 7,
+                            "action": "playpause", "window": "Player"})
+    with Harness(plugin) as h:
+        current = h.call_tool("resume_idle_monitor")
+        assert current.success, current.code
+        assert plugin.idle.started == (7, "playpause", "Player")
+        assert "возобновлено" in current.json["message"].lower()
+
+    plugin = SleepPauseTimer()
+    plugin.local_settings = {
+        "idle_minutes": 18,
+        "idle_action": "sleep",
+        "default_window": "",
+    }
+    plugin.idle = IdleStub({"running": False, "minutes": 0,
+                            "action": "playpause", "window": ""})
+    with Harness(plugin) as h:
+        saved = h.call_tool("resume_idle_monitor")
+        assert saved.success, saved.code
+        assert plugin.idle.started == (18, "sleep", "")
+
+
+def test_start_idle_monitor_accepts_and_saves_spoken_duration():
+    class IdleStub:
+        def __init__(self):
+            self.started = None
+
+        def start(self, minutes, action, window):
+            self.started = (minutes, action, window)
+            return {"running": True, "minutes": minutes, "action": action, "window": window}
+
+    plugin = SleepPauseTimer()
+    plugin.local_settings = {"idle_minutes": 30, "idle_action": "playpause"}
+    plugin.idle = IdleStub()
+    saved = {}
+
+    def save_settings(settings):
+        saved.update(settings)
+        return dict(settings)
+
+    plugin._save_local_settings = save_settings
+    with Harness(plugin) as h:
+        result = h.call_tool("start_idle_monitor", minutes=40)
+        assert result.success, result.code
+        assert plugin.idle.started == (40, "playpause", "")
+        assert saved["idle_minutes"] == 40
+        assert result.json["message"].endswith("40 мин")
 
 
 def test_zero_duration_is_a_bad_argument():
@@ -138,7 +221,7 @@ def test_list_windows_returns_numbered_titles():
 def test_widget_contribution_is_a_transparent_home_widget():
     plugin = SleepPauseTimer()
     contributions = asyncio.run(plugin.get_ui_contributions())
-    assert len(contributions) == 2
+    assert len(contributions) == 3
     timer_widget = next(c for c in contributions if c.id == "timer-widget")
     alarm_widget = next(c for c in contributions if c.id == "alarm-widget")
     assert timer_widget.slot == "home.widgets"
@@ -151,6 +234,12 @@ def test_widget_contribution_is_a_transparent_home_widget():
     assert alarm_widget.transparent is True
     assert alarm_widget.pointer_events is True
     assert alarm_widget.height > 0
+    settings_page = next(c for c in contributions if c.id == "timer-settings-page")
+    assert settings_page.slot == "page.custom"
+    assert settings_page.url == "settings-v2.html"
+    assert 'data:image/png;base64,' in settings_page.icon_svg
+    icon_payload = settings_page.icon_svg.split('base64,', 1)[1].split('"', 1)[0]
+    assert base64.b64decode(icon_payload)[:8] == b"\x89PNG\r\n\x1a\n"
 
 
 def test_ui_calls_report_engine_state():
@@ -300,7 +389,239 @@ def test_every_widget_method_has_an_ui_call():
         "alarm_stop",
         "alarm_cancel",
         "choose_alarm_sound",
+        "calendar_state",
+        "calendar_set",
+        "calendar_cancel",
+        "calendar_stop",
+        "settings_state",
+        "settings_save",
+        "idle_start",
+        "idle_stop",
+        "windows_list",
+        "timer_start_local",
+        "alarm_sound_choose_local",
+        "alarm_sound_save",
     } <= set(plugin._ui_calls)
+
+
+def test_alarm_rejects_bad_days_and_finds_next_selected_weekday(tmp_path):
+    from datetime import datetime
+    from src.alarm import AlarmEngine, AlarmError
+
+    class SilentPlayer:
+        def play_once(self, path, should_continue=None):
+            return True
+        def stop(self):
+            pass
+
+    now = datetime(2026, 9, 16, 7, 30)  # Wednesday
+    sound = tmp_path / "alarm.wav"
+    sound.write_bytes(b"audio")
+    engine = AlarmEngine(state_path=tmp_path / "days.json", now_fn=lambda: now, player=SilentPlayer())
+    try:
+        with pytest.raises(AlarmError):
+            engine.set_alarm(8, 0, str(sound), days_of_week=["1"])
+        state = engine.set_alarm(8, 0, str(sound), days_of_week=[4])
+        assert state["next_datetime"].startswith("2026-09-18T08:00")
+        assert state["days_of_week"] == [4]
+        engine.cancel()
+    finally:
+        engine.stop_thread()
+
+
+def test_corrupt_saved_days_do_not_restore_alarm_or_hang(tmp_path):
+    import json
+    from datetime import datetime
+    from src.alarm import AlarmEngine
+
+    (tmp_path / "alarm.json").write_text(json.dumps({"alarm": {
+        "hour": 8, "minute": 0, "days_of_week": [99]
+    }}), encoding="utf-8")
+    engine = AlarmEngine(state_path=tmp_path / "alarm.json", now_fn=lambda: datetime(2026, 9, 16, 7, 30))
+    try:
+        assert engine.state()["scheduled"] is False
+    finally:
+        engine.stop_thread()
+
+
+def test_calendar_alarm_is_saved_and_removed(tmp_path):
+    from datetime import date, timedelta
+    from src.calendar_alarms import CalendarAlarmEngine
+
+    class SilentPlayer:
+        def play_once(self, path, should_continue=None):
+            return True
+        def stop(self):
+            pass
+
+    engine = CalendarAlarmEngine(path=tmp_path / "calendar.json", player=SilentPlayer())
+    alarm_day = date.today() + timedelta(days=2)
+    try:
+        state = engine.set_alarm(alarm_day, 8, 15)
+        assert state["count"] == 1
+        assert state["alarms"][0] == {"date": alarm_day.isoformat(), "hour": 8, "minute": 15}
+        state = engine.set_alarm(alarm_day, None, None)
+        assert state["count"] == 0
+    finally:
+        engine.stop_thread()
+
+
+def test_calendar_keeps_multiple_dates_and_restores_them(tmp_path):
+    from datetime import date, timedelta
+    import json
+    from src.calendar_alarms import CalendarAlarmEngine
+
+    class SilentPlayer:
+        def play_once(self, path, should_continue=None):
+            return True
+        def stop(self):
+            pass
+
+    path = tmp_path / "calendar.json"
+    first = CalendarAlarmEngine(path=path, player=SilentPlayer())
+    dates = [date.today() + timedelta(days=offset) for offset in (1, 2, 3)]
+    try:
+        first.set_alarm(dates[0], 7, 30)
+        # Emulate another live instance updating the shared durable calendar.
+        path.write_text(json.dumps({
+            dates[0].isoformat(): {"hour": 7, "minute": 30},
+            dates[1].isoformat(): {"hour": 7, "minute": 30},
+        }), encoding="utf-8")
+        state = first.set_alarm(dates[2], 7, 30)
+        assert state["count"] == 3
+        assert [item["date"] for item in state["alarms"]] == [day.isoformat() for day in dates]
+    finally:
+        first.stop_thread()
+
+    restored = CalendarAlarmEngine(path=path, player=SilentPlayer())
+    try:
+        assert restored.state()["count"] == 3
+    finally:
+        restored.stop_thread()
+
+
+def test_calendar_supports_multiple_times_on_one_date_and_cancels_one(tmp_path):
+    from datetime import date, timedelta
+    from src.calendar_alarms import CalendarAlarmEngine
+
+    class SilentPlayer:
+        def play_once(self, path, should_continue=None):
+            return True
+        def stop(self):
+            pass
+
+    path = tmp_path / "calendar.json"
+    engine = CalendarAlarmEngine(path=path, player=SilentPlayer())
+    alarm_day = date.today() + timedelta(days=2)
+    try:
+        engine.set_alarm(alarm_day, 9, 0)
+        state = engine.set_alarm(alarm_day, 11, 0)
+        assert state["count"] == 2
+        assert [(row["hour"], row["minute"]) for row in state["alarms"]] == [(9, 0), (11, 0)]
+
+        # Adding the same date/time is idempotent and must not remove its sibling.
+        state = engine.set_alarm(alarm_day, 9, 0)
+        assert state["count"] == 2
+
+        state = engine.cancel_alarm(alarm_day, 9, 0)
+        assert state["count"] == 1
+        assert [(row["hour"], row["minute"]) for row in state["alarms"]] == [(11, 0)]
+    finally:
+        engine.stop_thread()
+
+    restored = CalendarAlarmEngine(path=path, player=SilentPlayer())
+    try:
+        assert restored.state()["count"] == 1
+        assert restored.state()["alarms"][0]["hour"] == 11
+    finally:
+        restored.stop_thread()
+
+
+def test_firing_one_calendar_alarm_preserves_newer_dates(tmp_path):
+    from datetime import date, datetime, timedelta
+    import json
+    from src.calendar_alarms import CalendarAlarmEngine
+
+    class SilentPlayer:
+        def play_once(self, path, should_continue=None):
+            return True
+        def stop(self):
+            pass
+
+    path = tmp_path / "calendar.json"
+    engine = CalendarAlarmEngine(path=path, player=SilentPlayer())
+    days = [date.today() + timedelta(days=offset) for offset in (1, 2, 3)]
+    try:
+        engine.set_alarm(days[0], 7, 30)
+        # Simulate a newer UI write while the worker has an older in-memory view.
+        path.write_text(json.dumps({
+            day.isoformat(): {"hour": 7, "minute": 30} for day in days
+        }), encoding="utf-8")
+        due_time = datetime.combine(days[0], datetime.min.time()).replace(hour=7, minute=31)
+        with engine._changed:
+            assert engine._claim_due_locked(f"{days[0].isoformat()}|07:30", due_time)
+        state = engine.state()
+        assert [item["date"] for item in state["alarms"]] == [day.isoformat() for day in days[1:]]
+        assert state["count"] == 2
+    finally:
+        engine.stop_thread()
+
+
+def test_home_alarm_state_includes_upcoming_calendar_alarm():
+    from datetime import date, timedelta
+
+    plugin = SleepPauseTimer()
+    try:
+        day = date.today() + timedelta(days=1)
+        plugin.calendar.set_alarm(day, 8, 15)
+        state = asyncio.run(plugin.alarm_state())
+        assert state["source"] == "calendar"
+        assert state["scheduled"] is True
+        assert state["playing"] is False
+        assert state["next_time"] == f"{day.isoformat()} 08:15"
+        assert state["calendar_count"] == 1
+    finally:
+        plugin.alarm.stop_thread()
+        plugin.calendar.stop_thread()
+
+
+def test_calendar_state_exposes_all_future_alarms_in_calendar_and_alarm_tabs():
+    from datetime import date, timedelta
+
+    plugin = SleepPauseTimer()
+    dates = [date.today() + timedelta(days=offset) for offset in (1, 2, 3)]
+    try:
+        for day in dates:
+            plugin.calendar.set_alarm(day, 7, 30)
+        calendar_state = asyncio.run(plugin.calendar_state())
+        alarm_state = asyncio.run(plugin.alarm_state())
+        assert calendar_state["count"] == 3
+        assert [row["date"] for row in calendar_state["alarms"]] == [day.isoformat() for day in dates]
+        assert alarm_state["calendar_count"] == 3
+        assert alarm_state["calendar_next"]["date"] == dates[0].isoformat()
+    finally:
+        plugin.alarm.stop_thread()
+        plugin.calendar.stop_thread()
+        plugin.idle.stop()
+
+
+def test_calendar_lists_and_cancels_one_shot_alarm_from_alarm_tab(tmp_path):
+    from datetime import datetime, timedelta
+
+    plugin = SleepPauseTimer()
+    sound = tmp_path / "alarm.wav"
+    sound.write_bytes(b"audio")
+    trigger = datetime.now() + timedelta(minutes=5)
+    try:
+        plugin.alarm.set_alarm(trigger.hour, trigger.minute, str(sound), repeat=False)
+        state = asyncio.run(plugin.calendar_state())
+        assert any(item["source"] == "alarm" for item in state["alarms"])
+        alarm = next(item for item in state["alarms"] if item["source"] == "alarm")
+        cancelled = asyncio.run(plugin.calendar_cancel(alarm["date"], "alarm"))
+        assert not any(item["source"] == "alarm" for item in cancelled["alarms"])
+    finally:
+        plugin.alarm.stop_thread()
+        plugin.calendar.stop_thread()
 
 
 def test_widget_cancel_stops_the_timer():
@@ -389,4 +710,3 @@ def test_repeat_alarm_never_reschedules_into_the_past():
         ) == datetime(2026, 9, 17, 7, 30)
     finally:
         engine.stop_thread()
-
