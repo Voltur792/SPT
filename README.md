@@ -1,7 +1,7 @@
 # Sleep Pause Timer
 
 Плагин [Astra](https://github.com/mihailinl/AstraPlugins) от **Voltur** (лицензия MIT) —
-портирование автономной программы «Таймер паузы» (`sleep_pause.py`).
+портирование автономной программы «Таймер паузы» (https://github.com/Voltur792/sleep-pause-timer).
 
 ## Что умеет
 
