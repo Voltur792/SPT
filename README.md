@@ -80,22 +80,6 @@
   (в оригинале вызов через `kernel32` падал с `AttributeError`).
 - GUI на Tkinter заменён виджетами в окне Astra; трей не нужен — управляет Астра.
 
-## Development
-
-Language: python
-
-```bash
-astra-plugin dev .
-```
-
-## Build
-
-```bash
-astra-plugin build
-```
-
-This produces a `.astraplugin` file for distribution.
-
 ## Лицензия
 
 MIT © Voltur
