@@ -12,6 +12,7 @@ servicer, so a tool that is declared but not routed fails here.
 
 import asyncio
 import base64
+import json
 import sys
 from pathlib import Path
 
@@ -31,6 +32,7 @@ def isolated_alarm_state(tmp_path, monkeypatch):
     # Без этого AlarmEngine пишет расписание в %APPDATA%: тесты оставляли бы
     # настоящий будильник на мелодию из временного файла, который удалён.
     monkeypatch.setenv("SPT_ALARM_STATE_DIR", str(tmp_path))
+    monkeypatch.setattr(SleepPauseTimer, "_local_settings_path", staticmethod(lambda: tmp_path / "settings.json"))
 
 EXPECTED_TOOLS = {
     "start_timer",
@@ -66,6 +68,12 @@ def test_tools_are_registered_with_matching_schemas():
             "start_timer", "hours", "minutes", "seconds", "action", "window"
         )
         h.assert_schema_accepts("set_alarm", "time", "sound_path", "repeat", "interval", "days_of_week")
+        assert h.schema("set_alarm")["properties"]["days_of_week"] == {
+            "type": "array", "items": {"type": "integer"},
+        }
+        assert h.schema("start_timer")["properties"]["action"]["enum"] == [
+            "", "playpause", "shutdown", "sleep",
+        ]
         h.assert_schema_accepts("start_idle_monitor", "minutes", "action", "window")
         assert h.schema("start_idle_monitor").get("required", []) == ["minutes"]
         # Все параметры опциональны — у каждого есть значение по умолчанию,
@@ -149,6 +157,130 @@ def test_zero_duration_is_a_bad_argument():
         result = h.call_tool("start_timer", hours=0, minutes=0, seconds=0)
         assert not result.success
         assert result.code == "BAD_ARGUMENTS", result.code
+
+
+def test_alarm_action_on_timer_redirects_to_clock_alarm():
+    with Harness(SleepPauseTimer()) as h:
+        result = h.call_tool("start_timer", hours=2, action="alarm")
+        assert not result.success
+        assert result.code == "BAD_ARGUMENTS"
+        assert "set_alarm" in result.error
+        assert h.ui_call("state").json["running"] is False
+
+
+@pytest.mark.parametrize("clock", ["02:00:15", "02:00:bad", "2 часа", "02:0", "-1:00"])
+def test_alarm_rejects_partial_or_ambiguous_clock_time(clock):
+    with Harness(SleepPauseTimer()) as h:
+        result = h.call_tool("set_alarm", time=clock)
+        assert not result.success
+        assert result.code == "BAD_ARGUMENTS"
+        assert h.call_tool("alarm_status").json["scheduled"] is False
+
+
+def test_clock_alarm_uses_saved_melody_and_rolls_over_midnight(tmp_path):
+    from datetime import datetime
+    from src.alarm import AlarmEngine
+
+    sound = tmp_path / "alarm.wav"
+    sound.write_bytes(b"audio")
+    engine = AlarmEngine(state_path=tmp_path / "alarm.json", now_fn=lambda: datetime(2026, 10, 1, 23, 0))
+    engine.set_sound(str(sound))
+    with Harness(SleepPauseTimer(alarm_engine=engine)) as h:
+        result = h.call_tool("set_alarm", time="2:00", repeat=False)
+        assert result.success, result.error
+        assert result.json["state"]["next_datetime"] == "2026-10-02T02:00:00"
+        assert result.json["state"]["sound_path"] == str(sound)
+        assert result.json["state"]["repeat"] is False
+        assert h.call_tool("cancel_alarm").success
+
+
+def test_alarm_picker_saves_melody_without_an_extra_tool_call(tmp_path, monkeypatch):
+    sound = tmp_path / "picked.wav"
+    sound.write_bytes(b"audio")
+    plugin = SleepPauseTimer()
+    monkeypatch.setattr(plugin, "_pick_alarm_sound", lambda: str(sound))
+    with Harness(plugin) as h:
+        selected = h.call_tool("choose_alarm_sound")
+        assert selected.success, selected.error
+        assert selected.json["cancelled"] is False
+        assert h.call_tool("alarm_status").json["sound_path"] == str(sound)
+
+
+def test_cancel_one_calendar_time_keeps_other_times(tmp_path):
+    from datetime import date, timedelta
+
+    sound = tmp_path / "alarm.wav"
+    sound.write_bytes(b"audio")
+    day = (date.today() + timedelta(days=2)).isoformat()
+    with Harness(SleepPauseTimer()) as h:
+        assert h.call_tool("set_alarm_sound", sound_path=str(sound)).success
+        assert h.call_tool("set_monthly_alarm", date=day, time="09:00").success
+        assert h.call_tool("set_monthly_alarm", date=day, time="11:00").success
+        result = h.call_tool("cancel_monthly_alarm", date=day, time="09:00")
+        assert result.success, result.error
+        assert [(row["hour"], row["minute"]) for row in result.json["state"]["alarms"]] == [(11, 0)]
+
+
+def test_stop_alarm_sound_also_silences_calendar_ringing(monkeypatch):
+    plugin = SleepPauseTimer()
+    stopped = []
+    monkeypatch.setattr(plugin.calendar, "state", lambda: {"playing": "calendar"})
+    monkeypatch.setattr(plugin.calendar, "stop_playback", lambda: stopped.append(True))
+    with Harness(plugin) as h:
+        result = h.call_tool("stop_alarm_sound")
+        assert result.success
+        assert result.json["message"] == "Звук будильника остановлен"
+        assert stopped == [True]
+
+
+def test_old_timer_worker_cannot_decrement_restarted_timer(monkeypatch):
+    from src.plugin import TimerEngine
+
+    class DeferredThread:
+        def __init__(self, **kwargs):
+            pass
+        def start(self):
+            pass
+
+    engine = TimerEngine()
+    monkeypatch.setattr("src.plugin.threading.Thread", DeferredThread)
+    monkeypatch.setattr("src.plugin.time.sleep", lambda _: None)
+    assert engine.start(600, "playpause", "")
+    previous_generation = engine._generation
+    engine.cancel()
+    assert engine.start(900, "playpause", "")
+    engine._run(previous_generation)
+    assert engine.state()["remaining_seconds"] == 900
+    engine.cancel()
+
+
+def test_screen_request_has_fresh_identity_and_active_window(monkeypatch):
+    from astra_plugin_sdk.proto import plugin_pb2
+
+    requests = []
+
+    class HostStub:
+        async def send_chat_message(self, text, **kwargs):
+            requests.append((text, kwargs))
+            yield plugin_pb2.PluginChatChunk(done=True)
+
+    plugin = SleepPauseTimer()
+    monkeypatch.setattr("src.plugin._foreground_window_title", lambda: "Astra — чат")
+    with Harness(plugin) as h:
+        original_host = plugin.host
+        plugin.host = HostStub()
+        try:
+            h.run(plugin._submit_screen_commentary())
+            h.run(plugin._submit_screen_commentary())
+        finally:
+            plugin.host = original_host
+    assert len(requests) == 2
+    assert requests[0][0] != requests[1][0]
+    assert "Astra — чат" in requests[0][0]
+    assert "take_screenshot" in requests[0][0]
+    assert "ТОЛЬКО изображение из результата этого нового вызова" in requests[0][0]
+    assert "Если видна игра" not in requests[0][0]
+    assert requests[0][1] == {"voice_enabled": True}
 
 
 def test_unknown_action_is_a_bad_argument():
@@ -261,6 +393,41 @@ def test_no_config_the_daemon_can_deliver_crashes_this_plugin():
         assert h.call_tool("alarm_status").success
 
 
+def test_screen_settings_autosave_persists_and_keeps_idle_settings(tmp_path, monkeypatch):
+    path = tmp_path / "settings.json"
+    monkeypatch.setattr(SleepPauseTimer, "_local_settings_path", staticmethod(lambda: path))
+    plugin = SleepPauseTimer()
+    plugin.local_settings = {
+        "default_action": "playpause", "default_window": "Player",
+        "idle_minutes": 50, "idle_action": "sleep",
+    }
+    with Harness(plugin) as h:
+        result = h.ui_call("screen_settings_save", enabled=True)
+        assert result.success
+        assert "error" not in result.json
+        saved = json.loads(path.read_text(encoding="utf-8"))
+        assert saved["screen_commentary_enabled"] is True
+        assert saved["screen_interval_min"] == 5
+        assert saved["idle_minutes"] == 50
+        assert saved["idle_action"] == "sleep"
+        assert saved["default_window"] == "Player"
+        assert plugin._load_local_settings() == saved
+
+
+def test_general_settings_save_keeps_autosaved_screen_settings(tmp_path, monkeypatch):
+    path = tmp_path / "settings.json"
+    monkeypatch.setattr(SleepPauseTimer, "_local_settings_path", staticmethod(lambda: path))
+    with Harness(SleepPauseTimer()) as h:
+        enabled = h.ui_call("screen_settings_save", enabled=True, min_interval=5, max_interval=10)
+        assert "error" not in enabled.json
+        saved = h.ui_call("settings_save", default_action="sleep", idle_minutes=20)
+        assert saved.success
+        assert "error" not in saved.json
+        assert saved.json["settings"]["screen_commentary_enabled"] is True
+        assert saved.json["settings"]["screen_interval_min"] == 5
+        assert saved.json["settings"]["screen_interval_max"] == 10
+
+
 def test_alarm_tools_registered():
     with Harness(SleepPauseTimer()) as h:
         tools = set(h.tool_names())
@@ -271,7 +438,7 @@ def test_alarm_tools_registered():
 def test_alarm_set_requires_sound_path():
     with Harness(SleepPauseTimer()) as h:
         # Missing sound_path should fail
-        result = h.call_tool("set_alarm", hour=7, minute=30)
+        result = h.call_tool("set_alarm", time="07:30")
         assert not result.success
         assert result.code == "BAD_ARGUMENTS"
 
@@ -331,7 +498,7 @@ def test_alarm_cancel():
             f.write(b"RIFF\x24\x00\x00\x00WAVEfmt ")
             temp_path = f.name
         try:
-            h.call_tool("set_alarm", hour=7, minute=30, sound_path=temp_path)
+            assert h.call_tool("set_alarm", time="07:30", sound_path=temp_path).success
             result = h.call_tool("cancel_alarm")
             assert result.success
             state = result.json["state"]

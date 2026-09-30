@@ -1,8 +1,8 @@
 [plugin]
 id = "sleep-pause-timer"
 name = "Sleep Pause Timer"
-version = "0.4.0"
-description = "Pause timer with a Home-screen countdown widget. At zero it presses the media play/pause key (optionally activating a chosen window first), shuts the PC down, or puts it to sleep."
+version = "1.0.0"
+description = "Countdown timers, alarm clocks, calendar alarms, inactivity tracking, and optional screen comments. Includes Home widgets and settings."
 author = "Voltur"
 license = "MIT"
 
@@ -21,10 +21,9 @@ runtimes = ["python"]
 tools = true
 ui_contributions = true
 
-# `[permissions]` — то, что плагин вызывает ИЗ демона. Пусто и это осознанно:
-# виджет сам опрашивает плагин через CallFromUi, инструменты вызывает демон,
-# никаких наружных действий над сессией пользователя плагин не совершает.
+# Запрос снимка инструментом Astra и комментария через канал сообщений плагина.
 [permissions]
+send_chat_message = { reason = "Asks Astra to take a screenshot and speak a short comment about your current activity at the interval you enable" }
 
 # Настройки — Астра сама рисует форму из этой JSON-схемы.
 [config]

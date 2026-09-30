@@ -250,7 +250,8 @@ class AlarmEngine:
 
     def _start_thread_locked(self) -> None:
         self._generation += 1
-        thread = threading.Thread(target=self._run, daemon=True)
+        self._condition.notify_all()
+        thread = threading.Thread(target=self._run, args=(self._generation,), daemon=True)
         self._thread = thread
         thread.start()
 
@@ -361,10 +362,8 @@ class AlarmEngine:
                 and self._playing
             )
 
-    def _run(self) -> None:
+    def _run(self, generation: int) -> None:
         log = logging.getLogger(__name__)
-        with self._condition:
-            generation = self._generation
         log.info("Alarm thread started, generation=%d", generation)
         while True:
             with self._condition:

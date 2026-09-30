@@ -114,6 +114,7 @@ body.list-scroll-mode .shell{width:100%;height:100%;min-height:0;display:flex;fl
       <div class="actions"><button id="saveSettings" class="primary">Сохранить</button><button id="refreshWindowsSettings">Список окон</button></div><div class="notice" id="settingsNotice"></div>
     </article>
     <article class="card"><h2>Действие при бездействии</h2><p class="hint">Движение мыши на любом мониторе и клавиатура сбрасывают отсчёт. Астре можно попросить перезапустить отсчёт с текущего момента; Telegram поддерживается, если интеграция передаёт сообщения ассистенту с доступом к инструментам плагинов.</p><div class="row"><div class="field"><label for="idleMinutes">Порог, минут</label><input id="idleMinutes" type="number" min="1" max="1440" value="30"></div><div class="field"><label for="idleAction">Действие</label><select id="idleAction"><option value="playpause">Медиа: пауза / продолжить</option><option value="shutdown">Выключить компьютер</option><option value="sleep">Спящий режим</option></select></div></div><div class="meta" id="idleStatus"><span class="dot"></span>Отслеживание выключено</div><div class="actions"><button id="idleStart" class="primary">Начать отслеживание</button><button id="idleStop" class="danger">Остановить</button></div><div class="notice" id="idleNotice"></div></article>
+    <article class="card"><h2>Случайные комментарии по экрану</h2><p class="hint">После недавней активности мыши или клавиатуры (за последние 5 минут) плагин просит Астру получить снимок встроенным инструментом и озвучить короткий комментарий. Выбранная модель должна поддерживать инструменты и изображения. Запрос и ответ появляются в чате плагина. Галочка и интервал сохраняются автоматически.</p><label class="day"><input id="screenCommentary" type="checkbox"> Включить случайные комментарии</label><div class="row"><div class="field"><label for="screenIntervalMin">Минимальный интервал, минут</label><input id="screenIntervalMin" type="number" min="5" max="1440" value="5"></div><div class="field"><label for="screenIntervalMax">Максимальный интервал, минут</label><input id="screenIntervalMax" type="number" min="5" max="1440" value="90"></div></div><div class="notice" id="screenNotice" aria-live="polite"></div><p class="hint" id="screenStatus" role="status">Ожидание соединения с плагином</p><button id="screenCheckNow" class="button" type="button">Проверить сейчас</button></article>
   </div></section>
 </main>
 
@@ -122,7 +123,7 @@ body.list-scroll-mode .shell{width:100%;height:100%;min-height:0;display:flex;fl
 <script>
 const api=window.astra||window.__astraBridge||null;
 const call=(name,args={})=>{const fn=api&&(api.callBackend||api.call);return fn?fn.call(api,name,args):Promise.reject(new Error('Нет соединения с Astra'));};
-const $=id=>document.getElementById(id), weekdays=['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];let currentMonth=new Date();currentMonth.setDate(1);let selectedDate='';let timerState=null;let refreshSequence=0;
+const $=id=>document.getElementById(id), weekdays=['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];let currentMonth=new Date();currentMonth.setDate(1);let selectedDate='';let timerState=null;let refreshSequence=0;let screenDraftRevision=0,screenSavedRevision=0,screenSavePromise=null;
 function notice(id,msg='',kind=''){const n=$(id);n.textContent=msg;n.className='notice '+kind;}
 function fmt(s){s=Math.max(0,Number(s)||0);const h=Math.floor(s/3600),m=Math.floor(s%3600/60),sec=s%60,p=n=>String(n).padStart(2,'0');return h?`${h}:${p(m)}:${p(sec)}`:`${p(m)}:${p(sec)}`;}
 document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{const tab=b.dataset.tab;document.querySelectorAll('.tab').forEach(t=>t.setAttribute('aria-selected',String(t===b)));document.querySelectorAll('.panel').forEach(p=>p.classList.toggle('active',p.id==='panel-'+tab));const localScroll=tab==='alarm'||tab==='calendar';document.documentElement.classList.toggle('list-scroll-mode',localScroll);document.body.classList.toggle('list-scroll-mode',localScroll);}));
@@ -130,7 +131,72 @@ for(const [i,d] of weekdays.entries()){$('days').insertAdjacentHTML('beforeend',
 async function refreshWindows(){try{const r=await call('windows_list');const selects=[$('timerWindow')];for(const s of selects){const old=s.value;s.innerHTML='<option value="">Не активировать окно</option>';for(const title of r.windows||[]){const m=title.match(/^(#\d+) — (.*)$/);const o=document.createElement('option');o.value=m?m[1]:title;o.textContent=title;s.append(o);}s.value=old;}}catch(e){notice('timerNotice',e.message,'error');}}
 async function refresh(){const request=++refreshSequence;try{const [t,a,c,s]=await Promise.all([call('state'),call('alarm_state'),call('calendar_state'),call('settings_state')]);if(request!==refreshSequence)return;timerState=t;renderTimer(t);const calendar=mergeCalendarStates(c,s?.calendar);renderAlarm(a,calendar);renderCalendar(calendar,a);renderSettings(s);$('globalStatus').textContent='Синхронизация с плагином активна';}catch(e){if(request===refreshSequence)$('globalStatus').textContent='Ожидание соединения с плагином';}}function renderTimer(s){$('timerReadout').textContent=s.running?fmt(s.remaining_seconds):'—';$('timerMeta').textContent=!s.running?'Таймер не запущен':`${s.paused?'На паузе':'Идёт'} · ${({playpause:'Медиа play/pause',sleep:'Спящий режим',shutdown:'Выключение'})[s.action]||s.action}${s.window?' · '+s.window:''}`;$('timerPause').textContent=s.paused?'Продолжить':'Пауза';}
 function renderAlarm(s,calendarState){if(!document.activeElement.closest('#panel-alarm')){$('soundPath').value=s.sound_path||'';$('alarmTime').value=`${String(s.hour||7).padStart(2,'0')}:${String(s.minute||30).padStart(2,'0')}`;$('alarmRepeat').value=String(!!s.repeat);$('alarmInterval').value=s.interval||5;document.querySelectorAll('#days input').forEach(x=>x.checked=(s.days_of_week||[0,1,2,3,4,5,6]).includes(Number(x.value)));}$('alarmReadout').textContent=s.playing?'Звонит':s.scheduled?(s.next_time||'Установлен'):'—';const count=(calendarState?.alarms||[]).length;$('alarmMeta').textContent=s.playing?'Нажмите «Остановить звонок»':`${s.scheduled?`${s.repeat?'Повтор':'Ближайший'} · ${s.sound_name||'мелодия не выбрана'}`:'Будильник не установлен'}${count?` · Будущих дат: ${count}`:''}`;}
-function renderSettings(s){const q=s.settings||{};if(!document.activeElement.closest('#panel-settings')){$('defaultAction').value=q.default_action||'playpause';$('defaultWindow').value=q.default_window||'';$('timerAction').value=q.default_action||'playpause';$('timerWindow').value=q.default_window||'';$('idleMinutes').value=q.idle_minutes||30;$('idleAction').value=q.idle_action||'playpause';}const i=s.idle||{};$('idleStatus').innerHTML=`<span class="dot ${i.running?'on':''}"></span>${i.running?(i.warning?'Скоро будет выполнено действие':i.triggered?'Действие выполнено; ждём возвращения':'До действия '+fmt(i.remaining_seconds)):'Отслеживание выключено'}`;}
+function renderSettings(s){
+  const q=s.settings||{};
+  if(!document.activeElement.closest('#panel-settings')){
+    $('defaultAction').value=q.default_action||'playpause';
+    $('defaultWindow').value=q.default_window||'';
+    $('timerAction').value=q.default_action||'playpause';
+    $('timerWindow').value=q.default_window||'';
+    $('idleMinutes').value=q.idle_minutes||30;
+    $('idleAction').value=q.idle_action||'playpause';
+  }
+  if(!screenSavePromise&&screenDraftRevision===screenSavedRevision&&!document.activeElement.closest('#panel-settings')){
+    $('screenCommentary').checked=!!q.screen_commentary_enabled;
+    $('screenIntervalMin').value=q.screen_interval_min||5;
+    $('screenIntervalMax').value=q.screen_interval_max||90;
+  }
+  const i=s.idle||{};
+  $('idleStatus').innerHTML='<span class="dot '+(i.running?'on':'')+'"></span>'+(i.running?(i.warning?'Скоро будет выполнено действие':i.triggered?'Действие выполнено; ждём возвращения':'До действия '+fmt(i.remaining_seconds)):'Отслеживание выключено');
+  const screen=s.screen||{},phase=screen.phase;
+  let status=({disabled:'Комментарии выключены',starting:'Подключение к Astra',sending:'Запрошены снимок экрана и ответ Astra…',away:'Ждём активности мыши или клавиатуры'})[phase]||'Ожидание соединения с плагином';
+  if(phase==='waiting')status='Следующая проверка через '+fmt(screen.remaining_seconds);
+  if(screen.error)status='Ошибка: '+screen.error+(phase==='waiting'?' Следующая попытка через '+fmt(screen.remaining_seconds):'');
+  else if(screen.last_success)status+=' · Последний ответ: '+new Date(screen.last_success*1000).toLocaleTimeString('ru-RU');
+  $('screenStatus').textContent=status;
+  $('screenStatus').className=screen.error?'notice error':'hint';
+  $('screenCheckNow').disabled=!q.screen_commentary_enabled||phase==='sending';
+}
+function saveScreenSettings(){
+  if(screenSavePromise)return screenSavePromise;
+  screenSavePromise=(async()=>{
+    try{
+      while(screenSavedRevision<screenDraftRevision){
+        const revision=screenDraftRevision;
+        notice('screenNotice','Сохранение…');
+        const r=await call('screen_settings_save',{
+          enabled:$('screenCommentary').checked,
+          min_interval:Number($('screenIntervalMin').value)||5,
+          max_interval:Number($('screenIntervalMax').value)||90
+        });
+        if(r.error)throw Error(r.error);
+        screenSavedRevision=revision;
+        ++refreshSequence;
+      }
+      notice('screenNotice','Сохранено','ok');
+      return true;
+    }catch(e){
+      notice('screenNotice',e.message,'error');
+      return false;
+    }
+  })().finally(()=>{screenSavePromise=null;});
+  return screenSavePromise;
+}
+for(const id of ['screenCommentary','screenIntervalMin','screenIntervalMax']){
+  $(id).addEventListener('change',()=>{
+    ++screenDraftRevision;
+    saveScreenSettings();
+  });
+}
+$('screenCheckNow').onclick=async()=>{
+  try{
+    if(screenSavedRevision<screenDraftRevision&&!await saveScreenSettings())return;
+    const r=await call('screen_check_now');
+    if(r.error)throw Error(r.error);
+    notice('screenNotice','Запрос на проверку отправлен','ok');
+    refresh();
+  }catch(e){notice('screenNotice',e.message,'error');}
+};
 function renderAlarmRows(target,alarms){
   const list=$(target);
   list.innerHTML='';
@@ -241,7 +307,7 @@ $('monthlySave').onclick=async()=>{const [hour,minute]=$('monthlyTime').value.sp
 $('prevMonth').onclick=()=>{currentMonth.setMonth(currentMonth.getMonth()-1);refresh();};$('nextMonth').onclick=()=>{currentMonth.setMonth(currentMonth.getMonth()+1);refresh();};
 $('timerStart').onclick=async()=>{try{const r=await call('timer_start_local',{hours:Number($('hours').value)||0,minutes:Number($('minutes').value)||0,seconds:Number($('seconds').value)||0,action:$('timerAction').value,window:$('timerWindow').value});if(r.error)throw Error(r.error);renderTimer(r);notice('timerNotice','Таймер запущен','ok');}catch(e){notice('timerNotice',e.message,'error');}};$('timerPause').onclick=async()=>{try{const method=timerState?.paused?'resume':'pause';renderTimer(await call(method));}catch(e){notice('timerNotice',e.message,'error');}};$('timerCancel').onclick=async()=>{await call('cancel');notice('timerNotice','Таймер отменён','ok');refresh();};$('refreshWindows').onclick=refreshWindows;
 $('chooseSound').onclick=async()=>{try{const r=await call('alarm_sound_choose_local');if(r.sound_path){$('soundPath').value=r.sound_path;const saved=await call('alarm_sound_save',{sound_path:r.sound_path});if(saved.error)throw Error(saved.error);}}catch(e){notice('alarmNotice',e.message,'error');}};$('saveAlarm').onclick=async()=>{const [hour,minute]=$('alarmTime').value.split(':').map(Number),days=[...document.querySelectorAll('#days input:checked')].map(x=>Number(x.value));if(!days.length){notice('alarmNotice','Выберите хотя бы один день','error');return;}try{const r=await call('alarm_set',{hour,minute,repeat:$('alarmRepeat').value==='true',interval:Number($('alarmInterval').value)||5,sound_path:$('soundPath').value,days_of_week:days});if(r.error)throw Error(r.error);notice('alarmNotice','Расписание сохранено','ok');refresh();}catch(e){notice('alarmNotice',e.message,'error');}};$('cancelAlarm').onclick=async()=>{const r=await call('alarm_cancel');notice('alarmNotice',r.scheduled?'':'Повторяющийся будильник отменён','ok');refresh();};$('stopAlarm').onclick=async()=>{await call('alarm_stop');refresh();};
-$('saveSettings').onclick=async()=>{try{const r=await call('settings_save',{default_action:$('defaultAction').value,default_window:$('defaultWindow').value,idle_minutes:Number($('idleMinutes').value)||30,idle_action:$('idleAction').value});if(r.error)throw Error(r.error);notice('settingsNotice','Настройки сохранены локально','ok');}catch(e){notice('settingsNotice',e.message,'error');}};$('refreshWindowsSettings').onclick=async()=>{try{const r=await call('windows_list');const names=(r.windows||[]).map(x=>x.replace(/^#\d+ — /,''));$('defaultWindow').placeholder=names.slice(0,5).join(' · ')||'Открытые окна не найдены';notice('settingsNotice',`${names.length} окон доступно`,'ok');}catch(e){notice('settingsNotice',e.message,'error');}};$('idleStart').onclick=async()=>{try{const r=await call('idle_start',{minutes:Number($('idleMinutes').value),action:$('idleAction').value,window:$('defaultWindow').value});if(r.error)throw Error(r.error);notice('idleNotice','Отслеживание включено','ok');refresh();}catch(e){notice('idleNotice',e.message,'error');}};$('idleStop').onclick=async()=>{await call('idle_stop');notice('idleNotice','Отслеживание остановлено','ok');refresh();};
+$('saveSettings').onclick=async()=>{try{if(screenSavedRevision<screenDraftRevision&&!await saveScreenSettings())throw Error('Не удалось сохранить комментарии по экрану');const r=await call('settings_save',{default_action:$('defaultAction').value,default_window:$('defaultWindow').value,idle_minutes:Number($('idleMinutes').value)||30,idle_action:$('idleAction').value});if(r.error)throw Error(r.error);notice('settingsNotice','Настройки сохранены локально','ok');}catch(e){notice('settingsNotice',e.message,'error');}};$('refreshWindowsSettings').onclick=async()=>{try{const r=await call('windows_list');const names=(r.windows||[]).map(x=>x.replace(/^#\d+ — /,''));$('defaultWindow').placeholder=names.slice(0,5).join(' · ')||'Открытые окна не найдены';notice('settingsNotice',`${names.length} окон доступно`,'ok');}catch(e){notice('settingsNotice',e.message,'error');}};$('idleStart').onclick=async()=>{try{const r=await call('idle_start',{minutes:Number($('idleMinutes').value),action:$('idleAction').value,window:$('defaultWindow').value});if(r.error)throw Error(r.error);notice('idleNotice','Отслеживание включено','ok');refresh();}catch(e){notice('idleNotice',e.message,'error');}};$('idleStop').onclick=async()=>{await call('idle_stop');notice('idleNotice','Отслеживание остановлено','ok');refresh();};
 refreshWindows();refresh();setInterval(refresh,1000);
 </script>
 </body>
