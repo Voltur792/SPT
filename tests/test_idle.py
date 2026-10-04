@@ -1,4 +1,23 @@
 from src.idle import IdleMonitor
+import threading
+
+
+def test_idle_worker_passes_custom_action_parameters(monkeypatch):
+    called = threading.Event()
+    calls = []
+    def callback(*args):
+        calls.append(args)
+        called.set()
+    monitor = IdleMonitor(callback)
+    monkeypatch.setattr(monitor, "_idle_seconds", lambda: 60)
+    monkeypatch.setattr(monitor, "_cursor_position", lambda: (1, 1))
+    monkeypatch.setattr(monitor, "_update_activity", lambda *args: 60)
+    try:
+        monitor.start(1, "hotkey", action_params={"keys": "Win+D"})
+        assert called.wait(1)
+        assert calls == [("hotkey", "", {"keys": "Win+D"})]
+    finally:
+        monitor.stop()
 
 
 def test_cursor_movement_on_negative_monitor_coordinates_resets_idle():

@@ -55,6 +55,9 @@ EXPECTED_TOOLS = {
     "resume_idle_monitor",
     "stop_idle_monitor",
     "idle_status",
+    "home_schedule_save",
+    "home_schedule_state",
+    "home_schedule_remove",
 }
 
 
@@ -72,8 +75,9 @@ def test_tools_are_registered_with_matching_schemas():
             "type": "array", "items": {"type": "integer"},
         }
         assert h.schema("start_timer")["properties"]["action"]["enum"] == [
-            "", "playpause", "shutdown", "sleep",
+            "", "playpause", "shutdown", "sleep", "close_app", "hotkey", "astra_command", "music", "music_pause",
         ]
+        assert h.schema("start_timer")["properties"]["action_params"]["type"] == "object"
         h.assert_schema_accepts("start_idle_monitor", "minutes", "action", "window")
         assert h.schema("start_idle_monitor").get("required", []) == ["minutes"]
         # Все параметры опциональны — у каждого есть значение по умолчанию,
@@ -262,6 +266,7 @@ def test_screen_request_has_fresh_identity_and_active_window(monkeypatch):
     class HostStub:
         async def send_chat_message(self, text, **kwargs):
             requests.append((text, kwargs))
+            yield plugin_pb2.PluginChatChunk(text="Вы общаетесь в Astra.")
             yield plugin_pb2.PluginChatChunk(done=True)
 
     plugin = SleepPauseTimer()
@@ -278,9 +283,23 @@ def test_screen_request_has_fresh_identity_and_active_window(monkeypatch):
     assert requests[0][0] != requests[1][0]
     assert "Astra — чат" in requests[0][0]
     assert "take_screenshot" in requests[0][0]
+    assert "core:take_screenshot" in requests[0][0]
     assert "ТОЛЬКО изображение из результата этого нового вызова" in requests[0][0]
     assert "Если видна игра" not in requests[0][0]
     assert requests[0][1] == {"voice_enabled": True}
+
+
+@pytest.mark.parametrize("reply", ["SCREEN_UNAVAILABLE", "Мне не удалось сделать свежий снимок экрана.", ""])
+def test_screen_failed_capture_is_not_reported_as_success(reply):
+    from astra_plugin_sdk.proto import plugin_pb2
+    class HostStub:
+        async def send_chat_message(self, *args, **kwargs):
+            yield plugin_pb2.PluginChatChunk(text=reply)
+            yield plugin_pb2.PluginChatChunk(done=True)
+    plugin = SleepPauseTimer()
+    plugin.host = HostStub()
+    with pytest.raises(RuntimeError):
+        asyncio.run(plugin._submit_screen_commentary())
 
 
 def test_unknown_action_is_a_bad_argument():
@@ -320,17 +339,23 @@ def test_start_pause_resume_cancel_lifecycle():
         assert status.json["running"] is False
 
 
-def test_second_start_is_refused_until_cancel():
+def test_second_start_is_independent_and_cancel_targets_one():
     with Harness(SleepPauseTimer()) as h:
         first = h.call_tool("start_timer", minutes=30)
         assert first.success, first.code
 
         second = h.call_tool("start_timer", minutes=10)
-        assert not second.success
-        assert second.code == "UNAVAILABLE", second.code
+        assert second.success
+        assert first.json["timer_id"] != second.json["timer_id"]
+        assert h.call_tool("pause_timer", timer_id=first.json["timer_id"]).success
+        states = h.call_tool("timer_status").json["timers"]
+        assert states[0]["paused"]
+        assert not states[1]["paused"]
 
         # Прибираемся: гасим таймер, чтобы он не дотикал до действия.
-        assert h.call_tool("cancel_timer").success
+        assert h.call_tool("cancel_timer", timer_id=second.json["timer_id"]).success
+        assert h.call_tool("timer_status", timer_id=first.json["timer_id"]).json["running"]
+        assert h.call_tool("cancel_timer", timer_id=first.json["timer_id"]).success
 
 
 def test_pause_and_cancel_without_timer_are_friendly():

@@ -29,6 +29,11 @@ from typing import Literal, Optional
 from .alarm import AlarmEngine, AlarmError
 from .calendar_alarms import CalendarAlarmEngine
 from .idle import IdleMonitor
+from .actions import CUSTOM_ACTIONS, AlarmPlayer, validate_action, perform_native, music_sound
+from .integrations import integration_call, IntegrationServer
+from .multi_timer import TimerPool
+from .home_schedule import HomeSchedule
+from .desktop_widgets import DesktopWidgets
 from astra_plugin_sdk import (
     BadArguments,
     Plugin,
@@ -36,12 +41,16 @@ from astra_plugin_sdk import (
     Unavailable,
     ui_call,
     tool,
+    trigger,
+    Field,
 )
 
 # ----------------- Константы (из оригинальной программы) -----------------
 
-ACTIONS = ("playpause", "shutdown", "sleep")
+ACTIONS = ("playpause", "shutdown", "sleep", *CUSTOM_ACTIONS)
+STANDARD_ACTIONS = ("playpause", "shutdown", "sleep")
 ACTION_LABELS = {
+    **CUSTOM_ACTIONS,
     "playpause": "нажать play/pause",
     "shutdown": "выключить ПК",
     "sleep": "спящий режим",
@@ -320,25 +329,28 @@ class TimerEngine:
 
     TICK = 0.2
 
-    def __init__(self):
+    def __init__(self, executor=None):
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
         self._total = 0
         self._remaining = 0.0
         self._paused = False
         self._active = False
+        self._executing = False
         self._action = ""
         self._window = ""
         self._outcome = ""  # "", "done", "cancelled"
         self._last_info = ""
         self._generation = 0
         self.windows = WindowManager()
+        self.executor = executor
+        self._params = {}
 
     # ---------- управление ----------
 
-    def start(self, total_seconds: int, action: str, window: str) -> bool:
+    def start(self, total_seconds: int, action: str, window: str, params=None) -> bool:
         with self._lock:
-            if self._active:
+            if self._active or self._executing:
                 return False
             self._total = int(total_seconds)
             self._remaining = float(total_seconds)
@@ -346,6 +358,7 @@ class TimerEngine:
             self._active = True
             self._action = action
             self._window = window
+            self._params = dict(params or {})
             self._outcome = ""
             self._last_info = ""
             self._generation += 1
@@ -386,6 +399,8 @@ class TimerEngine:
             remaining = max(0, int(round(self._remaining)))
             return {
                 "running": self._active,
+                "generation": self._generation,
+                "executing": self._executing,
                 "paused": self._active and self._paused,
                 "remaining_seconds": remaining,
                 "remaining": _fmt_hms(remaining),
@@ -394,6 +409,7 @@ class TimerEngine:
                 "window": self._window,
                 "outcome": self._outcome,
                 "info": self._last_info,
+                "action_params": dict(self._params),
             }
 
     def stop_thread(self) -> None:
@@ -425,9 +441,21 @@ class TimerEngine:
                 return
             self._remaining = 0.0
             action, window = self._action, self._window
+            params = dict(self._params)
             self._outcome = "done"
             self._active = False
-        self._execute(action, window)
+            self._executing = True
+        try:
+            if action in CUSTOM_ACTIONS:
+                self._last_info = self.executor(action, params) if self.executor else "Действие недоступно"
+            else:
+                self._execute(action, window)
+        except Exception as exc:
+            self._outcome = "error"
+            self._last_info = str(exc)
+        finally:
+            with self._lock:
+                self._executing = False
 
     # ---------- действие по завершении ----------
 
@@ -475,11 +503,17 @@ class SleepPauseTimer(Plugin):
 
     def __init__(self, alarm_engine=None):
         super().__init__()
-        self.engine = TimerEngine()
-        self.alarm = alarm_engine or AlarmEngine()
-        self.calendar = CalendarAlarmEngine()
+        self._integration_loop = None
+        self.engine = TimerEngine(self._execute_custom)
+        self.timers = TimerPool(self.engine, lambda: TimerEngine(self._execute_custom))
+        self.alarm = alarm_engine or AlarmEngine(player=AlarmPlayer())
+        self.calendar = CalendarAlarmEngine(player=AlarmPlayer())
+        self.home_schedule = HomeSchedule()
+        self._home_task = None
+        self.desktop = DesktopWidgets()
+        self._desktop_bridge = None
         self.calendar.set_sound_provider(lambda: self.alarm.state().get("sound_path", ""))
-        self.idle = IdleMonitor(self.engine._execute)
+        self.idle = IdleMonitor(self._execute_idle)
         self.local_settings = self._load_local_settings()
         self._screen_task = None
         self._screen_refresh = None
@@ -491,8 +525,76 @@ class SleepPauseTimer(Plugin):
 
     @staticmethod
     def _local_settings_path() -> Path:
-        base = os.environ.get("APPDATA") or os.environ.get("LOCALAPPDATA") or str(Path.home())
+        base = os.environ.get("SPT_ALARM_STATE_DIR") or os.environ.get("APPDATA") or os.environ.get("LOCALAPPDATA") or str(Path.home())
         return Path(base) / "sleep-pause-timer" / "settings.json"
+
+    @trigger("Завершение таймера: команда Astra", fields=[Field.text("command_key", "Метка команды", description="Та же метка, что указана в действии таймера")])
+    def timer_command(self):
+        pass
+
+    async def call_tool(self, name: str, arguments_json: str) -> dict:
+        response = await super().call_tool(name, arguments_json)
+        try:
+            payload = json.loads(response.get("result", ""))
+        except (ValueError, TypeError):
+            return response
+        response["result"] = json.dumps(payload, ensure_ascii=False)
+        if isinstance(payload, dict) and payload.get("error"):
+            response["success"] = False
+            response["error"] = str(payload["error"])
+        return response
+
+    def _execute_custom(self, action, params):
+        if action in ("close_app", "hotkey"):
+            return perform_native(action, params, self.engine.windows)
+        if action == "music":
+            integration_call("music", "play", **params)
+            return "Музыка запущена"
+        if action == "music_pause":
+            integration_call("music", "pause")
+            return "Музыка Astra приостановлена"
+        if action == "astra_command":
+            if self._integration_loop is None or self.host is None:
+                raise RuntimeError("Нет соединения с Astra")
+            future = asyncio.run_coroutine_threadsafe(self.fire_trigger("timer_command", {"command_key": params["command_key"]}), self._integration_loop)
+            future.result(timeout=30)
+            return "Событие отправлено в автоматизации Astra"
+        raise ValueError("Неизвестное действие")
+
+    def _execute_idle(self, action, window, params=None):
+        if action in CUSTOM_ACTIONS:
+            return self._execute_custom(action, params or {})
+        return self.engine._execute(action, window)
+
+    def _start_idle(self, minutes, action, window, params):
+        if action in CUSTOM_ACTIONS:
+            return self.idle.start(minutes, action, window, params)
+        return self.idle.start(minutes, action, window)
+
+    def _idle_parameters(self, action, window, params):
+        if action not in ACTIONS:
+            raise ValueError("Неизвестное действие при бездействии")
+        target = self.engine.windows.resolve_target(window) if window else ""
+        payload = dict(params or {})
+        if action in ("close_app", "hotkey") and target:
+            payload["window"] = target
+        payload = validate_action(action, payload)
+        if payload.get("window"):
+            payload["window"] = self.engine.windows.resolve_target(payload["window"])
+        return payload
+
+    def _ensure_integrations(self):
+        self._integration_loop = asyncio.get_running_loop()
+        if self._home_task is None or self._home_task.done():
+            self._home_task = asyncio.create_task(self.home_schedule.run())
+        if self._desktop_bridge is None:
+            self._desktop_bridge = IntegrationServer("timer", {
+                "desktop_snapshot": self.desktop_snapshot, "desktop_set": self.desktop_set,
+                "pause": self.pause, "resume": self.resume, "cancel": self.cancel,
+                "alarm_stop": self.alarm_stop, "alarm_cancel": self.alarm_cancel,
+            })
+            self._desktop_bridge.start(self._integration_loop)
+        self.desktop.ensure()
 
     def _load_local_settings(self) -> dict:
         try:
@@ -503,7 +605,7 @@ class SleepPauseTimer(Plugin):
 
     def _save_local_settings(self, settings: dict) -> dict:
         action = str(settings.get("default_action", "playpause"))
-        if action not in ACTIONS:
+        if action not in STANDARD_ACTIONS:
             raise ValueError("Неизвестное действие по умолчанию")
         try:
             minutes = max(1, min(1440, int(settings.get("idle_minutes", 30))))
@@ -512,6 +614,7 @@ class SleepPauseTimer(Plugin):
         idle_action = str(settings.get("idle_action", action))
         if idle_action not in ACTIONS:
             raise ValueError("Неизвестное действие при бездействии")
+        idle_params = validate_action(idle_action, settings.get("idle_action_params") or {})
         try:
             screen_interval_min = max(5, min(1440, int(settings.get("screen_interval_min", 5))))
             screen_interval_max = max(5, min(1440, int(settings.get("screen_interval_max", 90))))
@@ -524,6 +627,8 @@ class SleepPauseTimer(Plugin):
             "default_window": str(settings.get("default_window", "") or "").strip(),
             "idle_minutes": minutes,
             "idle_action": idle_action,
+            "idle_action_params": idle_params,
+            "idle_window": str(settings.get("idle_window", "") or "").strip(),
             "screen_commentary_enabled": bool(settings.get("screen_commentary_enabled", False)),
             "screen_interval_min": screen_interval_min,
             "screen_interval_max": screen_interval_max,
@@ -714,7 +819,7 @@ class SleepPauseTimer(Plugin):
 
     def _default_action(self) -> str:
         action = str(self.local_settings.get("default_action") or self.config.get("default_action", "") or "").strip().lower()
-        return action if action in ACTIONS else "playpause"
+        return action if action in STANDARD_ACTIONS else "playpause"
 
     def _default_window(self) -> str:
         if "default_window" in self.local_settings:
@@ -724,6 +829,9 @@ class SleepPauseTimer(Plugin):
     # ---------- инструменты ----------
 
     @tool(
+        "Поставить таймер, запустить обратный отсчёт. «Поставь таймер на 5 минут» → start_timer(minutes=5). "
+        "Не вызывай execute_command(name='timer'): это поиск сохранённой команды Astra. "
+        "Подтверди запуск только после успешного ответа с timer_id. "
         "Start a countdown timer that shows a live countdown widget on the Home "
         "screen. This is a duration countdown / таймер обратного отсчёта. "
         "For an alarm clock / будильник at a clock time (such as «на 2:00 ночи»), "
@@ -732,10 +840,13 @@ class SleepPauseTimer(Plugin):
         "'set a timer' / countdown request — 'поставь таймер', 'timer for N "
         "minutes', 'пауза через N минут', 'выключи через N минут' — the user watches "
         "it and can pause, resume or cancel it right from the widget. When it "
-        "reaches zero it presses the media play/pause key (default), shuts the "
-        "PC down, or puts it to sleep. Pass the duration via "
+        "reaches zero it executes the selected action. Multiple independent timers "
+        "can run together; name identifies a timer and the response gives timer_id. Pass the duration via "
         "hours/minutes/seconds (at least one must be > 0). action: playpause "
-        "(default), shutdown or sleep. window: a window title substring or "
+        "(default), shutdown, sleep, close_app, hotkey, astra_command, music or music_pause. "
+        "action_params: close_app needs window, hotkey needs keys (Ctrl+Alt+P) and optional window, "
+        "astra_command needs command_key matching a configured Astra timer trigger, music needs service and track_id. "
+        "window: a window title substring or "
         "'#N' from list_windows to activate before pressing the key "
         "(playpause only). ALWAYS call this tool to actually set a timer — "
         "never just say the timer is set."
@@ -745,14 +856,16 @@ class SleepPauseTimer(Plugin):
         hours: int = 0,
         minutes: int = 0,
         seconds: int = 0,
-        action: Literal["", "playpause", "shutdown", "sleep"] = "",
+        action: Literal["", "playpause", "shutdown", "sleep", "close_app", "hotkey", "astra_command", "music", "music_pause"] = "",
         window: str = "",
+        name: str = "",
+        action_params: Optional[dict] = None,
     ) -> dict:
         await self._ensure_config()
         total = int(hours) * 3600 + int(minutes) * 60 + int(seconds)
-        if total <= 0:
+        if min(int(hours), int(minutes), int(seconds)) < 0 or not 0 < total <= 365 * 86400:
             raise BadArguments(
-                "Длительность должна быть больше нуля — укажите часы, минуты или секунды"
+                "Укажите неотрицательные часы, минуты и секунды; длительность от 1 секунды до 365 дней"
             )
         act = (action or "").strip().lower() or self._default_action()
         if act in ("alarm", "будильник", "wake", "wakeup"):
@@ -763,50 +876,58 @@ class SleepPauseTimer(Plugin):
             )
         if act not in ACTIONS:
             raise BadArguments(
-                f"Неизвестное действие {act!r}. Доступны: playpause, shutdown, sleep"
+                f"Неизвестное действие {act!r}. Доступны: {', '.join(ACTIONS)}"
             )
         win = (window or "").strip() or self._default_window()
-        if win and act != "playpause":
+        win = self.engine.windows.resolve_target(win)
+        if win and act not in ("playpause", "close_app", "hotkey"):
             win = ""  # активация окна имеет смысл только перед нажатием клавиши
 
-        if not self.engine.start(total, act, win):
-            raise Unavailable("Таймер уже запущен — сначала отмените его (cancel_timer)")
+        try:
+            params = validate_action(act, action_params or ({"window": win} if act == "close_app" else {}))
+            if params.get("window"):
+                params["window"] = self.engine.windows.resolve_target(params["window"])
+            state = self.timers.add(total, act, win, name, params)
+        except (ValueError, TypeError) as exc:
+            raise BadArguments(str(exc)) from exc
 
         await self.log_info(f"start_timer: {_fmt_hms(total)}, action={act}, window={win!r}")
         message = f"Таймер на {_fmt_hms(total)} запущен; по завершении: {ACTION_LABELS[act]}"
         if win:
             message += f"; окно: {win}"
-        return {"message": message, "state": self.engine.state()}
+        return {"message": message, "state": state, "timer_id": state["id"]}
 
     @tool(
-        "Pause the running countdown. Use when the user asks to pause the timer."
+        "Pause one countdown by timer_id from timer_status. If omitted, selects the nearest active timer."
     )
-    async def pause_timer(self) -> str:
-        result = self.engine.pause()
+    async def pause_timer(self, timer_id: str = "") -> str:
+        engine = self.timers.get(timer_id)
+        result = engine.pause()
         await self.log_info(f"pause_timer -> {result}")
         if result == "idle":
             return "Таймер не запущен"
         if result == "already-paused":
             return "Таймер уже на паузе"
-        return f"Пауза. Осталось {self.engine.state()['remaining']}"
+        return f"Пауза. Осталось {engine.state()['remaining']}"
 
     @tool(
-        "Resume the paused countdown. Use when the user asks to continue the timer."
+        "Resume one countdown by timer_id from timer_status. If omitted, selects the nearest active timer."
     )
-    async def resume_timer(self) -> str:
-        result = self.engine.resume()
+    async def resume_timer(self, timer_id: str = "") -> str:
+        engine = self.timers.get(timer_id)
+        result = engine.resume()
         if result == "idle":
             return "Таймер не запущен"
         if result == "not-paused":
-            return f"Таймер идёт, осталось {self.engine.state()['remaining']}"
-        return f"Продолжаем. Осталось {self.engine.state()['remaining']}"
+            return f"Таймер идёт, осталось {engine.state()['remaining']}"
+        return f"Продолжаем. Осталось {engine.state()['remaining']}"
 
     @tool(
         "Cancel the countdown without performing its action. Use when the user "
-        "asks to stop or cancel the timer."
+        "asks to stop or cancel the timer. Pass timer_id to select one; omitted selects the nearest active timer."
     )
-    async def cancel_timer(self) -> str:
-        result = self.engine.cancel()
+    async def cancel_timer(self, timer_id: str = "") -> str:
+        result = self.timers.get(timer_id).cancel()
         await self.log_info(f"cancel_timer -> {result}")
         return "Таймер отменён" if result == "cancelled" else "Таймер не запущен"
 
@@ -815,8 +936,8 @@ class SleepPauseTimer(Plugin):
         "runs, is paused, how much is left and what will happen at zero. Use "
         "for 'сколько осталось' / 'how much is left on the timer' and similar."
     )
-    async def timer_status(self) -> dict:
-        state = self.engine.state()
+    async def timer_status(self, timer_id: str = "") -> dict:
+        state = self.timers.state(timer_id)
         if not state["running"]:
             message = "Таймер не запущен"
         elif state["paused"]:
@@ -826,6 +947,7 @@ class SleepPauseTimer(Plugin):
         if state["running"] or state["outcome"] == "done":
             message += f"; по завершении: {ACTION_LABELS.get(state['action'], state['action'])}"
         state["message"] = message
+        state["timers"] = self.timers.all()["timers"]
         return state
 
     @tool(
@@ -877,8 +999,8 @@ class SleepPauseTimer(Plugin):
         return {"message": "Календарный звонок остановлен" if was_playing else "Календарный звонок не звучит",
                 "state": self.calendar.state()}
 
-    @tool("Set the Windows inactivity threshold and start or restart monitoring. A request such as «Установи отслеживание бездействия на 40 минут» means call this tool with `minutes=40`. The required integer `minutes` is the number of minutes without input before the action runs. Optional `action` and `window` select what happens when the threshold is reached.")
-    async def start_idle_monitor(self, minutes: int, action: str = "", window: str = "") -> dict:
+    @tool("Set the Windows inactivity threshold and start or restart monitoring. «Установи отслеживание бездействия на 40 минут» means minutes=40. action: playpause, shutdown, sleep, close_app, hotkey, astra_command, music, music_pause. action_params: close_app needs window, hotkey needs keys and optional window, astra_command needs command_key, music needs service, track_id and VK extra.owner_id. Without action use saved settings.")
+    async def start_idle_monitor(self, minutes: int, action: str = "", window: str = "", action_params: Optional[dict] = None) -> dict:
         try:
             minutes = int(minutes)
         except (TypeError, ValueError) as exc:
@@ -886,18 +1008,26 @@ class SleepPauseTimer(Plugin):
         if not 1 <= minutes <= 1440:
             raise BadArguments("Порог бездействия должен быть от 1 до 1440 минут")
         act = (action or "").strip().lower() or str(self.local_settings.get("idle_action") or self._default_action())
-        target = (window or "").strip() or self._default_window()
-        if target and act != "playpause":
+        target = (window or "").strip()
+        if not target and action_params is None:
+            target = str(self.local_settings.get("idle_window") or self._default_window())
+        if target and act not in ("playpause", "close_app", "hotkey"):
             target = ""
         try:
+            supplied_params = action_params
+            if supplied_params is None:
+                supplied_params = self.local_settings.get("idle_action_params", {}) if not action else {}
+            params = self._idle_parameters(act, target, supplied_params)
             self.local_settings = self._save_local_settings({
                 **self.local_settings,
                 "default_action": self.local_settings.get("default_action") or self._default_action(),
                 "default_window": self.local_settings.get("default_window", self._default_window()),
                 "idle_minutes": minutes,
                 "idle_action": act,
+                "idle_action_params": params,
+                "idle_window": target,
             })
-            state = self.idle.start(minutes, act, target)
+            state = self._start_idle(minutes, act, target, params)
         except ValueError as exc:
             raise BadArguments(str(exc)) from exc
         except OSError as exc:
@@ -916,20 +1046,22 @@ class SleepPauseTimer(Plugin):
             minutes = configured_minutes
             action = str(current.get("action") or "").strip().lower()
             window = str(current.get("window") or "")
+            params = current.get("action_params", {})
         else:
             try:
                 minutes = int(self.local_settings.get("idle_minutes", 30))
             except (TypeError, ValueError):
                 minutes = 30
             action = str(self.local_settings.get("idle_action") or self._default_action()).strip().lower()
-            window = self._default_window()
+            window = str(self.local_settings.get("idle_window") or self._default_window())
+            params = self.local_settings.get("idle_action_params", {})
         minutes = max(1, min(1440, minutes))
         if action not in ACTIONS:
             action = self._default_action()
-        if action != "playpause":
+        if action not in ("playpause", "close_app", "hotkey"):
             window = ""
         try:
-            state = self.idle.start(minutes, action, window)
+            state = self._start_idle(minutes, action, window, self._idle_parameters(action, window, params))
         except ValueError as exc:
             raise BadArguments(str(exc)) from exc
         return {"message": f"Отслеживание бездействия возобновлено. Новый отсчёт: {minutes} мин", "state": state}
@@ -945,23 +1077,23 @@ class SleepPauseTimer(Plugin):
     # ---------- вызовы из виджета (CallFromUi) ----------
 
     @ui_call
-    async def state(self):
-        return self.engine.state()
+    async def state(self, timer_id: str = ""):
+        return {**self.timers.state(timer_id), **self.timers.all()}
 
     @ui_call
-    async def pause(self):
-        self.engine.pause()
-        return self.engine.state()
+    async def pause(self, timer_id: str = ""):
+        self.timers.get(timer_id).pause()
+        return await self.state(timer_id)
 
     @ui_call
-    async def resume(self):
-        self.engine.resume()
-        return self.engine.state()
+    async def resume(self, timer_id: str = ""):
+        self.timers.get(timer_id).resume()
+        return await self.state(timer_id)
 
     @ui_call
-    async def cancel(self):
-        self.engine.cancel()
-        return self.engine.state()
+    async def cancel(self, timer_id: str = ""):
+        self.timers.get(timer_id).cancel()
+        return await self.state(timer_id)
 
     @ui_call
     async def alarm_state(self):
@@ -1134,6 +1266,7 @@ class SleepPauseTimer(Plugin):
     @ui_call
     async def settings_save(self, default_action: str, default_window: str = "",
                             idle_minutes: int = 30, idle_action: str = "playpause",
+                            idle_action_params: Optional[dict] = None, idle_window: str | None = None,
                             screen_commentary_enabled: bool | None = None,
                             screen_interval_min: int | None = None,
                             screen_interval_max: int | None = None):
@@ -1144,6 +1277,8 @@ class SleepPauseTimer(Plugin):
                 "idle_minutes": idle_minutes, "idle_action": idle_action,
             }
             for name, value in (
+                ("idle_action_params", idle_action_params),
+                ("idle_window", idle_window),
                 ("screen_commentary_enabled", screen_commentary_enabled),
                 ("screen_interval_min", screen_interval_min),
                 ("screen_interval_max", screen_interval_max),
@@ -1170,20 +1305,16 @@ class SleepPauseTimer(Plugin):
             return {"error": str(exc)}
 
     @ui_call
-    async def idle_start(self, minutes: int, action: str, window: str = ""):
+    async def idle_start(self, minutes: int, action: str, window: str = "", action_params: Optional[dict] = None):
         try:
-            self.local_settings = self._save_local_settings({
-                **self.local_settings,
-                "idle_minutes": minutes,
-                "idle_action": action,
-            })
-            return self.idle.start(minutes, action, window)
-        except (ValueError, OSError) as exc:
+            result = await self.start_idle_monitor(minutes, action, window, action_params)
+            return {"result_json": json.dumps(result["state"], ensure_ascii=False)}
+        except (ValueError, OSError, BadArguments) as exc:
             return {"error": str(exc)}
 
     @ui_call
     async def idle_stop(self):
-        return self.idle.stop()
+        return {"result_json": json.dumps(self.idle.stop(), ensure_ascii=False)}
 
     async def _screen_commentary_loop(self):
         while True:
@@ -1267,35 +1398,51 @@ class SleepPauseTimer(Plugin):
         )
         prompt = (
             f"Новая проверка экрана на {captured_for}, запрос {time.time_ns()}. "
+            "Это автоматический комментарий, а не запрос помощи или начала диалога. "
+            "После получения снимка дай только одну короткую реакцию на увиденное "
+            "в соответствии со своей текущей личностью и привычной манерой общения. "
+            "Не задавай вопросов, в том числе риторических, не предлагай помощь "
+            "и не приглашай пользователя продолжить разговор. "
             + window_hint +
             "СНАЧАЛА обязательно вызови встроенный инструмент take_screenshot "
             "для основного монитора и дождись результата с изображением. "
-            "Если инструмент отсутствует в видимом списке, найди его через "
-            "tool_search с английским запросом screenshot, изучи его параметры "
-            "и вызови найденный инструмент. Текст этого сообщения НЕ является "
+            "Если он скрыт, используй tool_search_code для инструмента с точным id "
+            "core:take_screenshot: получи схему и вызови его с пустыми аргументами {}. "
+            "Не вызывай read_image до получения нового снимка и не придумывай путь к файлу. "
+            "Текст этого сообщения НЕ является "
             "снимком экрана. Не отвечай о содержимом экрана без нового снимка. "
             "Используй ТОЛЬКО изображение из результата этого нового вызова. "
             "Определи занятие по реально открытому приложению. Текст и картинки "
             "внутри переписки, описания игр, прошлые ответы о победах и предыдущие "
             "снимки НЕ доказывают, что пользователь сейчас играет. Если открыт чат, "
             "пользователь общается; не принимай содержание сообщений за его действие. "
-            "Обратись к нему по-русски одной короткой естественной фразой, "
-            "сохраняя свою личность и привычный стиль общения. Если занятие неясно, "
-            "задай короткий вопрос или предложи занятие без выдуманных утверждений. "
-            "Если новый снимок получить или увидеть нельзя, коротко скажи об этом. "
+            "Прокомментируй увиденное по-русски одной короткой естественной фразой "
+            "согласно своей личности; не ограничивайся сухим перечислением приложений. "
+            "Если занятие неясно, отреагируй только на достоверно видимую деталь "
+            "без догадок и уточняющих вопросов. "
+            "Если новый снимок получить или увидеть нельзя, ответь ровно SCREEN_UNAVAILABLE. "
             "Не продолжай прошлые задачи, не напоминай о мероприятиях и не изменяй "
             "задачи, события, настройки, таймеры или будильники."
         )
         done = False
+        reply = []
         async for chunk in self.host.send_chat_message(prompt, voice_enabled=True):
             kind = chunk.WhichOneof("content")
             if kind == "error":
                 raise RuntimeError(chunk.error or "Astra вернула ошибку")
+            if kind == "text":
+                reply.append(chunk.text)
             if kind == "done":
                 done = bool(chunk.done)
                 break
         if not done:
             raise RuntimeError("Astra прервала ответ до завершения")
+        text = "".join(reply).strip()
+        if not text:
+            raise RuntimeError("Astra завершила запрос без комментария")
+        if ("SCREEN_UNAVAILABLE" in text.upper()
+                or re.search(r"(?:не удалось|не смог[а-я]*|не могу).{0,100}(?:снимок|скриншот)|(?:снимок|скриншот).{0,80}(?:недоступен|не получен)", text, re.I | re.S)):
+            raise RuntimeError("Astra не получила свежий снимок экрана. Проверьте поддержку инструментов и изображений у выбранной модели.")
 
     @ui_call
     async def windows_list(self):
@@ -1303,15 +1450,83 @@ class SleepPauseTimer(Plugin):
 
     @ui_call
     async def timer_start_local(self, hours: int, minutes: int, seconds: int,
-                                action: str, window: str = ""):
-        total = int(hours) * 3600 + int(minutes) * 60 + int(seconds)
-        if total <= 0:
-            return {"error": "Длительность должна быть больше нуля"}
-        if action not in ACTIONS:
-            return {"error": "Неизвестное действие"}
-        if not self.engine.start(total, action, window if action == "playpause" else ""):
-            return {"error": "Таймер уже запущен"}
-        return self.engine.state()
+                                action: str, window: str = "", name: str = "", action_params: Optional[dict] = None):
+        try:
+            result = await self.start_timer(hours, minutes, seconds, action, window, name, action_params)
+            return result["state"]
+        except (BadArguments, ValueError, TypeError) as exc:
+            return {"error": str(exc)}
+
+    @ui_call
+    async def music_search(self, query: str, service: str = "yandex"):
+        try:
+            return await asyncio.to_thread(integration_call, "music", "search", query=query, service=service, limit=15)
+        except Exception as exc:
+            return {"error": str(exc)}
+
+    @ui_call
+    async def music_current(self):
+        try:
+            return await asyncio.to_thread(integration_call, "music", "current")
+        except Exception as exc:
+            return {"error": str(exc)}
+
+    @ui_call
+    async def alarm_music_save(self, track: dict):
+        try:
+            return self.alarm.set_sound(music_sound(track))
+        except (ValueError, AlarmError) as exc:
+            return {"error": str(exc)}
+
+    @ui_call
+    async def home_catalog(self):
+        try:
+            devices = await asyncio.to_thread(integration_call, "home", "devices")
+            scenarios = await asyncio.to_thread(integration_call, "home", "scenarios")
+            return {"devices": devices, "scenarios": scenarios}
+        except Exception as exc:
+            return {"error": str(exc)}
+
+    @ui_call
+    async def desktop_state(self):
+        return self.desktop.state()
+
+    @ui_call
+    async def desktop_set(self, kind: str, settings: dict):
+        try:
+            result = self.desktop.set(kind, settings)
+            if self.host is not None:
+                self._ensure_integrations()
+            return result
+        except (OSError, ValueError, TypeError) as exc:
+            return {"error": str(exc)}
+
+    @ui_call
+    async def desktop_snapshot(self, kind: str):
+        if kind not in ("timer", "alarm"):
+            return {"error": "Неизвестный виджет"}
+        return {"settings": self.desktop.state()[kind], "state": await self.state() if kind == "timer" else await self.alarm_state()}
+
+    @tool("Add or update a Smart Home schedule. entry contains kind=scenario/device, target_id, time=HH:MM, date=YYYY-MM-DD for once or days=[0..6] Monday..Sunday, name and enabled. Devices require capability_type, instance and value. Schedule uses local Windows time; Astra must be running.")
+    @ui_call
+    async def home_schedule_save(self, entry: dict):
+        try:
+            return self.home_schedule.upsert(entry)
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            return {"error": str(exc)}
+
+    @tool("List device and scenario schedules and the result of the last execution.")
+    @ui_call
+    async def home_schedule_state(self):
+        return self.home_schedule.state()
+
+    @tool("Remove one Smart Home schedule by its id.")
+    @ui_call
+    async def home_schedule_remove(self, id: str):
+        try:
+            return self.home_schedule.remove(id)
+        except OSError as exc:
+            return {"error": str(exc)}
 
     @ui_call
     async def alarm_sound_choose_local(self):
@@ -1370,6 +1585,9 @@ class SleepPauseTimer(Plugin):
     # ---------- завершение ----------
 
     async def on_shutdown(self):
+        await asyncio.to_thread(self.desktop.close)
+        if self._desktop_bridge:
+            await asyncio.to_thread(self._desktop_bridge.close)
         if self._screen_task:
             self._screen_task.cancel()
             try:
@@ -1377,13 +1595,20 @@ class SleepPauseTimer(Plugin):
             except asyncio.CancelledError:
                 pass
             self._screen_task = None
-        self.engine.stop_thread()
+        if self._home_task:
+            self._home_task.cancel()
+            try:
+                await self._home_task
+            except asyncio.CancelledError:
+                pass
+        self.timers.stop()
         self.alarm.stop_thread()
         self.calendar.stop_thread()
         self.idle.stop()
 
     async def on_config_changed(self, config: dict):
         self.config = config
+        self._ensure_integrations()
         self._ensure_screen_task()
         sound_path = config.get("alarm_sound_path", "")
         if sound_path:

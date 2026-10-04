@@ -4,6 +4,7 @@ from __future__ import annotations
 import ctypes
 import threading
 import time
+from .actions import CUSTOM_ACTIONS, validate_action
 
 
 class LASTINPUTINFO(ctypes.Structure):
@@ -25,20 +26,22 @@ class IdleMonitor:
         self._minutes = 0
         self._action = "playpause"
         self._window = ""
+        self._params = {}
         self._triggered = False
         self._error = ""
         self._last_activity_at: float | None = None
         self._last_cursor_position: tuple[int, int] | None = None
 
-    def start(self, minutes: int, action: str, window: str = "") -> dict:
+    def start(self, minutes: int, action: str, window: str = "", action_params=None) -> dict:
         try:
             minutes = int(minutes)
         except (TypeError, ValueError) as exc:
             raise ValueError("Укажите число минут") from exc
         if not 1 <= minutes <= 1440:
             raise ValueError("Период бездействия должен быть от 1 до 1440 минут")
-        if action not in ("playpause", "shutdown", "sleep"):
+        if action not in ("playpause", "shutdown", "sleep", *CUSTOM_ACTIONS):
             raise ValueError("Неизвестное действие")
+        params = validate_action(action, action_params or {})
         if action != "playpause":
             window = ""
         try:
@@ -56,13 +59,14 @@ class IdleMonitor:
         with self._lock:
             self._stop = threading.Event()
             self._minutes, self._action, self._window = minutes, action, window
+            self._params = params
             self._triggered = False
             self._error = ""
             # Starting or resuming begins a fresh interval now. This also makes
             # a remote Telegram request useful even if Windows was already idle.
             self._last_activity_at = time.monotonic()
             self._last_cursor_position = cursor_position
-            self._thread = threading.Thread(target=self._run, name="spt-idle-monitor", daemon=True)
+            self._thread = threading.Thread(target=self._run, args=(self._stop,), name="spt-idle-monitor", daemon=True)
             self._thread.start()
             return self.state()
 
@@ -94,6 +98,7 @@ class IdleMonitor:
             "minutes": minutes,
             "action": action,
             "window": window,
+            "action_params": dict(self._params),
             "triggered": triggered,
             "warning": running and not triggered and 0 < remaining <= 300,
             "remaining_seconds": remaining,
@@ -138,9 +143,10 @@ class IdleMonitor:
                 self._last_activity_at = now
             return max(0, int(now - self._last_activity_at))
 
-    def _run(self) -> None:
+    def _run(self, stop_event=None) -> None:
+        stop_event = stop_event or self._stop
         cooldown_until = 0.0
-        while not self._stop.wait(self.POLL_INTERVAL):
+        while not stop_event.wait(self.POLL_INTERVAL):
             now = time.monotonic()
             try:
                 system_idle_seconds = self._idle_seconds()
@@ -161,6 +167,8 @@ class IdleMonitor:
             idle_seconds = self._update_activity(cursor_position, system_idle_seconds, now)
             callback = None
             with self._lock:
+                if stop_event.is_set():
+                    return
                 self._error = input_error or cursor_error
                 if self._triggered and now >= cooldown_until and idle_seconds < 2:
                     # The user returned after our synthetic media key/action.
@@ -168,10 +176,11 @@ class IdleMonitor:
                 if idle_seconds >= self._minutes * 60 and not self._triggered:
                     self._triggered = True
                     cooldown_until = now + 15
-                    callback = (self._action, self._window)
+                    callback = (self._action, self._window, dict(self._params)) if self._action in CUSTOM_ACTIONS else (self._action, self._window)
             if callback:
                 try:
                     self._action_callback(*callback)
                 except Exception as exc:
                     with self._lock:
-                        self._error = str(exc)
+                        if not stop_event.is_set():
+                            self._error = str(exc)

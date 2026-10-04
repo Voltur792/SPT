@@ -48,6 +48,13 @@ def normalize_sound_path(path: str) -> str:
     raw = str(path or "").strip()
     if not raw:
         raise AlarmError("Укажите путь к аудиофайлу")
+    if raw.startswith("music://"):
+        from .actions import decode_music
+        try:
+            decode_music(raw)
+        except ValueError as exc:
+            raise AlarmError(str(exc)) from exc
+        return raw
     expanded = os.path.expandvars(os.path.expanduser(raw))
     candidate = Path(expanded)
     if not candidate.is_file():
@@ -453,6 +460,10 @@ class AlarmEngine:
                 sound_name = Path(self._sound_path).name
             except (OSError, ValueError):
                 sound_name = self._sound_path
+            if self._sound_path.startswith("music://"):
+                from .actions import decode_music
+                track = decode_music(self._sound_path)
+                sound_name = f"{track.get('artist', '')} — {track.get('title') or track['track_id']}"
         else:
             sound_name = ""
         if self._playing:

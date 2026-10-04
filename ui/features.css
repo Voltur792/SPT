@@ -1,0 +1,40 @@
+[hidden] { display: none !important; }
+.timer-entry {
+  height: 120px;
+  min-height: 120px;
+  max-height: 120px;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: 24px 20px 34px;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+.timer-entry strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.timer-entry .remaining { font-size: 20px; font-variant-numeric: tabular-nums; }
+.timer-entry .meta { grid-column: 1 / -1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 0; }
+.timer-entry .actions { margin-top: 0; grid-column: 1 / -1; flex-wrap: nowrap; }
+.timer-form-card { overflow-y: auto; }
+.timer-state-card > h2, .timer-state-card > .hint, .timer-state-card > .metric, .timer-state-card > .meta { flex: 0 0 auto; }
+.home-entry { padding: 12px; border: 1px solid var(--line); border-radius: 10px; }
+.home-entry p { margin: 4px 0; }
+.home-entry .actions { margin-top: 8px; }
+.list-scroll-mode .home-form-card { display: block; overflow-y: auto; }
+.list-scroll-mode .home-form-card #homeCalendar { grid-auto-rows: auto; }
+.list-scroll-mode .home-form-card #homeCalendar .calday { height: 42px; min-height: 42px; }
+.music-results { display: grid; gap: 6px; max-height: 260px; overflow: auto; }
+.music-results button { text-align: left; }
+.music-dialog { width: min(540px, 100%); }
+.field input[type=range] { padding: 0; }
+.widget-option { display: flex; align-items: center; gap: 8px; margin: 12px 0; }
+@media(max-width: 767px) {
+  html.list-scroll-mode, body.list-scroll-mode { height: auto; overflow: auto; }
+  .list-scroll-mode .shell { height: auto; }
+  .list-scroll-mode .panel.active, .list-scroll-mode .grid { overflow: visible; }
+  #panel-timer .card, #panel-home .card { grid-column: span 12; }
+  .list-scroll-mode #timerList, .list-scroll-mode #homeList { flex: none; max-height: 390px; overflow-y: auto; }
+  .timer-form-card, .list-scroll-mode .home-form-card { overflow: visible; }
+}

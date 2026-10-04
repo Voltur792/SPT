@@ -192,7 +192,7 @@
       el.time.classList.toggle('paused', !!s.paused);
       const action = ACTION_LABELS[s.action] || s.action || '';
       const win = s.window ? ` · ${s.window}` : '';
-      el.meta.textContent = (s.paused ? '⏸ пауза · ' : '') + action + win;
+      el.meta.textContent = (s.name ? s.name + ' · ' : '') + (s.paused ? '⏸ пауза · ' : '') + action + win + ((s.timers||[]).filter(t=>t.running).length>1?' · ещё '+((s.timers||[]).filter(t=>t.running).length-1):'');
       const total = Math.max(1, s.total_seconds || 1);
       const done = Math.min(100, Math.max(0, (1 - s.remaining_seconds / total) * 100));
       el.fill.style.width = done.toFixed(1) + '%';
@@ -203,10 +203,10 @@
       try { render(await call('state', {})); } catch (e) { /* мост ещё не готов */ }
     }
     el.pause.addEventListener('click', async () => {
-      try { render(await call(last && last.paused ? 'resume' : 'pause', {})); } catch (e) {}
+      try { render(await call(last && last.paused ? 'resume' : 'pause', {timer_id:last?.id||''})); } catch (e) {}
     });
     el.cancel.addEventListener('click', async () => {
-      try { render(await call('cancel', {})); } catch (e) {}
+      try { render(await call('cancel', {timer_id:last?.id||''})); } catch (e) {}
     });
     for (const [node, fn] of [[el.pause, () => el.pause.click()], [el.cancel, () => el.cancel.click()]]) {
       node.addEventListener('keydown', ev => {

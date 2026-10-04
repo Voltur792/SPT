@@ -1,8 +1,8 @@
 [plugin]
 id = "sleep-pause-timer"
 name = "Sleep Pause Timer"
-version = "1.0.0"
-description = "Countdown timers, alarm clocks, calendar alarms, inactivity tracking, and optional screen comments. Includes Home widgets and settings."
+version = "1.1.0"
+description = "Independent countdowns with custom actions, music alarms, Smart Home schedules, desktop timer and alarm widgets, inactivity tracking, and optional screen comments."
 author = "Voltur"
 license = "MIT"
 
@@ -19,10 +19,12 @@ runtimes = ["python"]
 # `[capabilities]` — то, что демон может вызывать В плагине.
 [capabilities]
 tools = true
+triggers = true
 ui_contributions = true
 
 # Запрос снимка инструментом Astra и комментария через канал сообщений плагина.
 [permissions]
+fire_trigger = { reason = "Runs user-configured Astra automations when a named countdown completes" }
 send_chat_message = { reason = "Asks Astra to take a screenshot and speak a short comment about your current activity at the interval you enable" }
 
 # Настройки — Астра сама рисует форму из этой JSON-схемы.
