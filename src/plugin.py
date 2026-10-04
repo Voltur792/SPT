@@ -1544,7 +1544,7 @@ class SleepPauseTimer(Plugin):
     async def get_ui_contributions(self) -> list[UiContribution]:
         # Строим вручную, а не через @ui_slot: нужен transparent=True
         # (иначе Astra зальёт iframe непрозрачным фоном — «чёрный фон виджета»).
-        icon_path = Path(__file__).resolve().parent.parent / "icon.png"
+        icon_path = Path(__file__).resolve().parent.parent / "ui" / "app-icon.png"
         try:
             icon_data = base64.b64encode(icon_path.read_bytes()).decode("ascii")
             page_icon = (

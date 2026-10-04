@@ -127,7 +127,7 @@ def run_window(kind):
         shell32.SetCurrentProcessExplicitAppUserModelID.restype = ctypes.c_long
         shell32.SetCurrentProcessExplicitAppUserModelID("Voltur.SleepPauseTimer.Widget." + kind)
     root = tk.Tk()
-    root.widget_icon = tk.PhotoImage(file=str(Path(__file__).resolve().parent.parent / "icon.png"))
+    root.widget_icon = tk.PhotoImage(file=str(Path(__file__).resolve().parent.parent / "ui" / "app-icon.png"))
     root.title("Таймер паузы · " + ("Таймер" if kind == "timer" else "Будильник"))
     root.overrideredirect(True)
     root.configure(bg="#25243b")
