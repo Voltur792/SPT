@@ -38,3 +38,32 @@
   .list-scroll-mode #timerList, .list-scroll-mode #homeList { flex: none; max-height: 390px; overflow-y: auto; }
   .timer-form-card, .list-scroll-mode .home-form-card { overflow: visible; }
 }
+
+.radio-shifts {display:grid;gap:10px;margin-top:14px;min-width:0}
+.radio-shift {padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--surface-2);min-width:0}
+.radio-shift strong,.radio-shift p {overflow-wrap:anywhere}
+.radio-shift p {margin:7px 0;font-size:12px;color:var(--muted)}
+.radio-shift .actions {margin-top:10px}
+#panel-radio .field {min-width:0;flex-basis:140px}
+#radioLinkStatus {overflow-wrap:anywhere}
+#panel-radio .days .day {max-width:100%}
+#panel-radio .radio-options {display:grid;gap:10px;margin:14px 0 16px;min-width:0}
+#panel-radio .radio-option {display:flex;align-items:flex-start;gap:9px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;color:var(--text);font-size:12px;line-height:1.5;cursor:pointer;min-width:0}
+#panel-radio .radio-option input {flex:0 0 16px;width:16px;height:16px;min-height:16px;margin:1px 0 0;padding:0}
+#panel-radio .radio-option span {min-width:0;overflow-wrap:anywhere}
+#panel-radio .radio-options .hint {margin:7px 2px 0;line-height:1.5}
+@media(max-width:1000px){#panel-radio .card {grid-column:span 12}}
+.radio-picks {display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}
+.radio-picks:empty {display:none}
+.radio-picks button {max-width:100%;overflow-wrap:anywhere}
+.radio-picks button[aria-pressed=true] {background:var(--action);border-color:var(--focus);color:#fff}
+html.radio-scroll-mode,body.radio-scroll-mode {height:100%;min-height:0;overflow:hidden}
+.radio-scroll-mode .shell {height:100%;min-height:0}
+.radio-scroll-mode #panel-radio.active {display:flex;flex:1 1 auto;min-height:0;overflow:hidden}
+.radio-scroll-mode #panel-radio .grid {flex:1 1 auto;min-height:0;overflow:hidden;grid-template-rows:minmax(0,1fr)}
+.radio-scroll-mode #panel-radio .calendar-card {display:block;min-height:0;overflow-y:auto;overscroll-behavior:contain}
+.radio-scroll-mode #panel-radio .upcoming-card {display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.radio-scroll-mode #panel-radio .upcoming-card > :not(#radioList) {flex:0 0 auto}
+.radio-scroll-mode #radioList {display:flex;flex-direction:column;flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;padding-right:4px}
+.radio-scroll-mode #radioList > * {flex:0 0 auto}
+@media(max-width:1000px){.radio-scroll-mode #panel-radio .grid {grid-template-rows:minmax(0,1fr) minmax(0,.7fr)}}

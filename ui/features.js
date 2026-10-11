@@ -38,7 +38,7 @@ function idleParams(){const a=$('idleAction').value;if(a==='close_app')return {w
 $('idleAction').addEventListener('change',syncIdle);
 let settingsDraftRevision=0;
 function markSettingsDirty(){settingsDraftRevision++;window.settingsFormDirty=true;}
-for(const event of ['input','change'])$('panel-settings').addEventListener(event,e=>{if(!['screenCommentary','screenIntervalMin','screenIntervalMax'].includes(e.target.id))markSettingsDirty();});
+for(const event of ['input','change'])$('panel-settings').addEventListener(event,e=>{if(!['screenCommentary','screenIntervalMin','screenIntervalMax','screenMonitor'].includes(e.target.id))markSettingsDirty();});
 const originalRenderSettings=renderSettings;
 renderSettings=function(s){originalRenderSettings(s);if(!settingsFormEditing()){const q=s.settings||{},p=q.idle_action_params||{};$('idleWindow').value=q.idle_window||p.window||'';$('idleKeys').value=p.keys||'';$('idleCommandKey').value=p.command_key||'';chosenIdleTrack=p.track_id?p:null;$('idleMusicLabel').textContent=chosenIdleTrack?(p.artist||'')+' — '+(p.title||p.track_id):'Выберите трек';syncIdle();syncAction();}if(s.idle?.error){$('idleStatus').textContent='Ошибка: '+s.idle.error;}};
 $('idleStart').onclick=async()=>{const b=$('idleStart');b.disabled=true;try{await checkedCall('idle_start',{minutes:Number($('idleMinutes').value),action:$('idleAction').value,window:$('idleWindow').value,action_params:idleParams()});notice('idleNotice','Отслеживание включено','ok');await refresh();}catch(e){notice('idleNotice',e.message,'error');}finally{b.disabled=false;}};

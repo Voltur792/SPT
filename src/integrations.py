@@ -99,7 +99,7 @@ class IntegrationServer:
             pass
 
 
-def integration_call(name, method, **params):
+def integration_call(name, method, /, **params):
     try:
         location = json.loads((registry_dir() / (name + ".json")).read_text(encoding="utf-8"))
         port = int(location["port"])
@@ -113,5 +113,5 @@ def integration_call(name, method, **params):
             raise RuntimeError(str(result["error"]))
         return result
     except (OSError, ValueError, KeyError, URLError) as exc:
-        label = {"music": "Музыка", "home": "Умный дом"}.get(name, name)
+        label = {"music": "Музыка", "home": "Умный дом", "discord": "Discord"}.get(name, name)
         raise RuntimeError(f"Нет связи с плагином «{label}». Обновите и перезапустите его в Astra.") from exc

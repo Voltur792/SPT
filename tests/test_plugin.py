@@ -261,11 +261,19 @@ def test_old_timer_worker_cannot_decrement_restarted_timer(monkeypatch):
 def test_screen_request_has_fresh_identity_and_active_window(monkeypatch):
     from astra_plugin_sdk.proto import plugin_pb2
 
+    monkeypatch.setattr("src.plugin.time.time_ns", lambda: 123456789)
+
     requests = []
+    paths = []
+    monkeypatch.setattr("src.plugin.capture_desktop", lambda selection: b"fresh JPEG")
 
     class HostStub:
         async def send_chat_message(self, text, **kwargs):
             requests.append((text, kwargs))
+            import re
+            path = Path(json.loads(re.search(r'("[^"\n]*spt-screen-[^"\n]*\.jpg")', text).group(1)))
+            assert path.read_bytes() == b"fresh JPEG"
+            paths.append(path)
             yield plugin_pb2.PluginChatChunk(text="Вы общаетесь в Astra.")
             yield plugin_pb2.PluginChatChunk(done=True)
 
@@ -282,16 +290,18 @@ def test_screen_request_has_fresh_identity_and_active_window(monkeypatch):
     assert len(requests) == 2
     assert requests[0][0] != requests[1][0]
     assert "Astra — чат" in requests[0][0]
-    assert "take_screenshot" in requests[0][0]
-    assert "core:take_screenshot" in requests[0][0]
-    assert "ТОЛЬКО изображение из результата этого нового вызова" in requests[0][0]
+    assert "прямым вызовом read_image" in requests[0][0]
+    assert "не читай изображение внутри tool_search_code" in requests[0][0]
+    assert len(requests[0][0]) < 900
+    assert all(not path.exists() for path in paths)
     assert "Если видна игра" not in requests[0][0]
     assert requests[0][1] == {"voice_enabled": True}
 
 
 @pytest.mark.parametrize("reply", ["SCREEN_UNAVAILABLE", "Мне не удалось сделать свежий снимок экрана.", ""])
-def test_screen_failed_capture_is_not_reported_as_success(reply):
+def test_screen_failed_capture_is_not_reported_as_success(reply, monkeypatch):
     from astra_plugin_sdk.proto import plugin_pb2
+    monkeypatch.setattr("src.plugin.capture_desktop", lambda selection: b"fresh JPEG")
     class HostStub:
         async def send_chat_message(self, *args, **kwargs):
             yield plugin_pb2.PluginChatChunk(text=reply)
@@ -307,6 +317,54 @@ def test_unknown_action_is_a_bad_argument():
         result = h.call_tool("start_timer", minutes=5, action="explode")
         assert not result.success
         assert result.code == "BAD_ARGUMENTS", result.code
+
+
+def test_screen_capture_failure_sends_no_chat_message(monkeypatch):
+    def failed_capture(_):
+        raise RuntimeError("Монитор отключён")
+    monkeypatch.setattr("src.plugin.capture_desktop", failed_capture)
+    plugin = SleepPauseTimer()
+    plugin.host = object()
+    with pytest.raises(RuntimeError, match="Монитор отключён"):
+        asyncio.run(plugin._submit_screen_commentary())
+
+
+def test_screen_image_is_removed_when_request_is_cancelled(monkeypatch):
+    import re
+    paths = []
+    monkeypatch.setattr("src.plugin.capture_desktop", lambda _: b"fresh JPEG")
+    class HostStub:
+        async def send_chat_message(self, text, **kwargs):
+            paths.append(Path(json.loads(re.search(r'("[^"\n]*spt-screen-[^"\n]*\.jpg")', text).group(1))))
+            await asyncio.Event().wait()
+            yield
+    plugin = SleepPauseTimer()
+    plugin.host = HostStub()
+    async def cancel_request():
+        task = asyncio.create_task(plugin._submit_screen_commentary())
+        while not paths:
+            await asyncio.sleep(0.001)
+        assert paths[0].exists()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    asyncio.run(cancel_request())
+    assert not paths[0].exists()
+
+
+def test_screen_monitor_selection_persists_and_survives_general_save(tmp_path):
+    with Harness(SleepPauseTimer()) as h:
+        result = h.ui_call("screen_settings_save", enabled=True, monitor="all")
+        assert result.success, result.error
+        assert result.json["settings"]["screen_monitor"] == "all"
+        saved = h.ui_call("settings_save", default_action="playpause")
+        assert saved.success, saved.error
+        assert saved.json["settings"]["screen_monitor"] == "all"
+        invalid = h.ui_call("screen_settings_save", enabled=True, monitor="../private")
+        assert not invalid.success
+        assert "монитор" in invalid.error
+    restored = SleepPauseTimer()
+    assert restored.local_settings["screen_monitor"] == "all"
 
 
 def test_start_pause_resume_cancel_lifecycle():

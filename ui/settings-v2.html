@@ -81,7 +81,7 @@ body.list-scroll-mode .shell{width:100%;height:100%;min-height:0;display:flex;fl
 <body>
 <main class="shell">
   <header class="head"><div><h1>Таймер паузы</h1><p class="subtitle">Таймеры, расписание и локальные действия Windows</p></div><div class="status" id="globalStatus">Подключение к Astra…</div></header>
-  <nav class="tabs" role="tablist" aria-label="Разделы"><button class="tab" role="tab" aria-selected="true" data-tab="timer">Таймеры</button><button class="tab" role="tab" aria-selected="false" data-tab="alarm">Будильник</button><button class="tab" role="tab" aria-selected="false" data-tab="calendar">Календарь</button><button class="tab" role="tab" aria-selected="false" data-tab="home">Умный дом</button><button class="tab" role="tab" aria-selected="false" data-tab="settings">Настройки</button><button class="tab" role="tab" aria-selected="false" data-tab="desktop">Виджеты</button></nav>
+  <nav class="tabs" role="tablist" aria-label="Разделы"><button class="tab" role="tab" aria-selected="true" data-tab="timer">Таймеры</button><button class="tab" role="tab" aria-selected="false" data-tab="alarm">Будильник</button><button class="tab" role="tab" aria-selected="false" data-tab="calendar">Календарь</button><button class="tab" role="tab" aria-selected="false" data-tab="radio">Радио</button><button class="tab" role="tab" aria-selected="false" data-tab="home">Умный дом</button><button class="tab" role="tab" aria-selected="false" data-tab="settings">Настройки</button><button class="tab" role="tab" aria-selected="false" data-tab="desktop">Виджеты</button></nav>
 
   <section class="panel active" id="panel-timer"><div class="grid">
     <article class="card timer-form-card"><h2>Обратный отсчёт</h2><p class="hint">По окончании сработает выбранное действие.</p>
@@ -119,8 +119,31 @@ body.list-scroll-mode .shell{width:100%;height:100%;min-height:0;display:flex;fl
       <div class="actions"><button id="saveSettings" class="primary">Сохранить</button><button id="refreshWindowsSettings">Список окон</button></div><div class="notice" id="settingsNotice"></div>
     </article>
     <article class="card"><h2>Действие при бездействии</h2><p class="hint">Движение мыши на любом мониторе и клавиатура сбрасывают отсчёт. Астре можно попросить перезапустить отсчёт с текущего момента; Telegram поддерживается, если интеграция передаёт сообщения ассистенту с доступом к инструментам плагинов.</p><div class="row"><div class="field"><label for="idleMinutes">Порог, минут</label><input id="idleMinutes" type="number" min="1" max="1440" value="30"></div><div class="field"><label for="idleAction">Действие</label><select id="idleAction"><option value="playpause">Медиа: пауза / продолжить</option><option value="shutdown">Выключить компьютер</option><option value="sleep">Спящий режим</option></select></div></div><div class="meta" id="idleStatus"><span class="dot"></span>Отслеживание выключено</div><div class="actions"><button id="idleStart" class="primary">Начать отслеживание</button><button id="idleStop" class="danger">Остановить</button></div><div class="notice" id="idleNotice"></div></article>
-    <article class="card"><h2>Случайные комментарии по экрану</h2><p class="hint">После недавней активности мыши или клавиатуры (за последние 5 минут) плагин просит Астру получить снимок встроенным инструментом и озвучить короткий комментарий. Выбранная модель должна поддерживать инструменты и изображения. Запрос и ответ появляются в чате плагина. Галочка и интервал сохраняются автоматически.</p><label class="day"><input id="screenCommentary" type="checkbox"> Включить случайные комментарии</label><div class="row"><div class="field"><label for="screenIntervalMin">Минимальный интервал, минут</label><input id="screenIntervalMin" type="number" min="5" max="1440" value="5"></div><div class="field"><label for="screenIntervalMax">Максимальный интервал, минут</label><input id="screenIntervalMax" type="number" min="5" max="1440" value="90"></div></div><div class="notice" id="screenNotice" aria-live="polite"></div><p class="hint" id="screenStatus" role="status">Ожидание соединения с плагином</p><button id="screenCheckNow" class="button" type="button">Проверить сейчас</button></article>
+    <article class="card"><h2>Случайные комментарии по экрану</h2><p class="hint">После недавней активности мыши или клавиатуры (за последние 5 минут) плагин делает свежий снимок выбранных экранов и просит Астру озвучить короткий комментарий. Модель должна поддерживать инструменты и изображения. Запрос и ответ появляются в чате плагина; временный снимок удаляется после ответа. Настройки сохраняются автоматически.</p><label class="day"><input id="screenCommentary" type="checkbox"> Включить случайные комментарии</label><div class="row"><div class="field"><label for="screenIntervalMin">Минимальный интервал, минут</label><input id="screenIntervalMin" type="number" min="5" max="1440" value="5"></div><div class="field"><label for="screenIntervalMax">Максимальный интервал, минут</label><input id="screenIntervalMax" type="number" min="5" max="1440" value="90"></div></div><div class="row"><div class="field"><label for="screenMonitor">Какие экраны комментировать</label><select id="screenMonitor"><option value="primary">Основной монитор</option><option value="all">Все мониторы</option></select></div><button id="screenRefreshMonitors" class="button" type="button">Обновить мониторы</button></div><div class="notice" id="screenNotice" aria-live="polite"></div><p class="hint" id="screenStatus" role="status">Ожидание соединения с плагином</p><button id="screenCheckNow" class="button" type="button">Проверить сейчас</button></article>
   </div></section>
+  <section class="panel" id="panel-radio"><div class="grid">
+    <article class="card calendar-card"><h2>Смены радиоведущей Astra</h2><p class="hint">Astra входит в выбранный канал, включает музыку с подводками, а в конце смены останавливает эфир и выходит. Astra, таймер, Discord-плагин и Astra Music должны работать. Время местное; пропущенные смены не запускаются.</p>
+      <div class="row"><button id="radioConnect" type="button">Проверить связь с Discord</button><button id="radioAllow" type="button" hidden>Разрешить автоэфиры</button><span id="radioLinkStatus" class="meta" role="status">Связь ещё не проверена</span></div>
+      <div class="field"><label for="radioName">Название смены</label><input id="radioName" maxlength="100" placeholder="Вечерний эфир"></div>
+      <div class="row"><div class="field"><label for="radioStart">Начало</label><input id="radioStart" type="time" value="18:00"></div><div class="field"><label for="radioEnd">Окончание</label><input id="radioEnd" type="time" value="20:00"></div><div class="field"><label for="radioRepeat">Повтор</label><select id="radioRepeat"><option value="daily">Каждый день</option><option value="weekly">По дням недели</option><option value="once">На дату</option></select></div></div>
+      <p class="hint">Если время окончания раньше начала, выход из канала будет на следующий день.</p><div id="radioDays" class="days" hidden></div><div class="field" id="radioDateField" hidden><label for="radioDate">Дата начала</label><input id="radioDate" type="date"></div>
+      <div class="row"><div class="field"><label for="radioGuild">ID сервера Discord</label><input id="radioGuild" inputmode="numeric" maxlength="20" list="radioGuildOptions" placeholder="ID сервера"><datalist id="radioGuildOptions"></datalist></div><div class="field"><label for="radioChannel">ID голосового канала</label><input id="radioChannel" inputmode="numeric" maxlength="20" list="radioChannelOptions" placeholder="ID канала"><datalist id="radioChannelOptions"></datalist></div><button id="radioChannels" type="button">Загрузить каналы</button></div>
+      <div id="radioGuildButtons" class="radio-picks" role="group" aria-label="Серверы Discord"></div><div id="radioChannelButtons" class="radio-picks" role="group" aria-label="Голосовые каналы Discord"></div><p id="radioChannelHint" class="hint">Нажмите «Загрузить каналы», чтобы выбрать сервер и канал по названию.</p>
+      <div class="row"><div class="field"><label for="radioService">Музыкальный сервис</label><select id="radioService"><option value="yandex">Яндекс Музыка</option><option value="vk">VK Музыка</option><option value="spotify">Spotify</option></select></div><div class="field"><label for="radioSource">Что включать</label><select id="radioSource"></select></div></div>
+      <div id="radioPlaylistFields" hidden><div class="row"><div class="field"><label for="radioPlaylist">Плейлист</label><select id="radioPlaylist"><option value="">Сначала загрузите список</option></select></div><button id="radioPlaylists" type="button">Загрузить плейлисты</button></div><div class="field"><label for="radioPlaylistId">ID плейлиста или ссылка Spotify</label><input id="radioPlaylistId" maxlength="500" placeholder="Можно выбрать выше или указать вручную"></div></div>
+      <p class="hint">Для Spotify включите режим без окна браузера в Astra Music. Во время эфира Spotify звучит только в Discord.</p>
+      <div class="row"><div class="field"><label for="radioEvery">Частота подводок</label><select id="radioEvery"><option value="1">Каждую песню</option><option value="3" selected>Раз в 3 песни</option><option value="5">Раз в 5 песен</option></select></div><div class="field"><label for="radioWhen">Когда говорить</label><select id="radioWhen"><option value="end">В конце песни</option><option value="start">В начале песни</option></select></div></div>
+      <div class="radio-options" role="group" aria-label="Параметры эфира">
+        <label class="radio-option"><input id="radioNext" type="checkbox" checked><span>Объявлять следующую песню, если очередь доступна</span></label>
+        <label class="radio-option"><input id="radioEnabled" type="checkbox" checked><span>Включить расписание</span></label>
+        <div><label class="radio-option"><input id="radioSkipEmpty" type="checkbox" checked aria-describedby="radioSkipEmptyHelp"><span>Пропускать подводки, если в канале нет слушателей</span></label><p id="radioSkipEmptyHelp" class="hint">Музыка продолжит играть. Боты не считаются слушателями; запросы к модели и озвучке пропускаются.</p></div>
+      </div>
+      <p class="hint">На время смены подводки включаются с указанной частотой и выбранной личностью Astra. Бот ведёт одну смену одновременно. Редактирование действующей смены завершает текущий эфир.</p>
+      <div class="actions"><button id="radioSave" type="button" class="primary" disabled>Добавить смену</button><button id="radioCancelEdit" type="button" hidden>Отменить правку</button></div><div id="radioNotice" class="notice" role="status"></div>
+    </article>
+    <article class="card upcoming-card"><h2>Расписание эфиров</h2><p class="hint">Ближайший запуск и состояние последней смены.</p><div id="radioActive" class="calendar-summary" role="status" hidden></div><button id="radioStop" type="button" class="danger" hidden>Остановить текущую смену</button><div id="radioList" class="radio-shifts" role="list"></div><div id="radioStateNotice" class="notice" role="status"></div></article>
+  </div></section>
+
   <section class="panel" id="panel-home"><div class="grid">
     <article class="card calendar-card home-form-card"><h2>Расписание умного дома</h2><p class="hint">Устройства и сценарии из подключённого плагина «Умный дом». Время местное; Astra и оба плагина должны работать. Пропущенные часы не запускаются задним числом.</p>
       <div class="row"><div class="field"><label for="homeKind">Что запускать</label><select id="homeKind"><option value="scenario">Сценарий</option><option value="device">Устройство</option></select></div><button id="homeReload">Обновить список</button></div>
@@ -137,7 +160,7 @@ body.list-scroll-mode .shell{width:100%;height:100%;min-height:0;display:flex;fl
     <article class="card" data-widget="alarm"><h2>Будильник на рабочем столе</h2><p class="hint">Отдельное окно с ближайшим будильником и остановкой звонка.</p><div id="desktopAlarmForm"></div></article>
   </div><div class="notice" id="desktopNotice" role="status"></div></section>
 </main>
-<link rel="stylesheet" href="features.css">
+<link rel="stylesheet" href="features.css?v=2">
 <div class="modal" id="musicModal" role="dialog" aria-modal="true" aria-labelledby="musicTitle"><div class="dialog music-dialog"><h2 id="musicTitle">Музыка из Astra Music</h2><p class="hint">Сначала подключите сервис в плагине «Музыка». Аккаунт и воспроизведение остаются в нём.</p><div class="row"><div class="field"><label for="musicService">Сервис</label><select id="musicService"><option value="yandex">Яндекс Музыка</option><option value="vk">VK</option></select></div><div class="field"><label for="musicQuery">Название или исполнитель</label><input id="musicQuery" placeholder="Поиск трека"></div></div><div class="actions"><button id="musicSearch">Найти</button><button id="musicUseCurrent">Текущий трек</button><button id="musicClose">Закрыть</button></div><div class="notice" id="musicNotice" role="status"></div><div class="music-results" id="musicResults"></div></div></div>
 
 <div class="modal" id="alarmModal" role="dialog" aria-modal="true" aria-labelledby="modalTitle"><div class="dialog"><h2 id="modalTitle">Будильник на дату</h2><p class="hint" id="modalDate"></p><div class="field"><label for="monthlyTime">Время</label><input id="monthlyTime" type="time" value="07:30"></div><div class="actions"><button id="monthlySave" class="primary">Сохранить</button><button id="monthlyRemove" class="danger">Удалить</button><button id="monthlyClose">Закрыть</button></div><div class="notice" id="modalNotice"></div></div></div>
@@ -148,7 +171,7 @@ const call=(name,args={})=>{const fn=api&&(api.callBackend||api.call);return fn?
 const $=id=>document.getElementById(id), weekdays=['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];let currentMonth=new Date();currentMonth.setDate(1);let selectedDate='';let timerState=null;let refreshSequence=0;let screenDraftRevision=0,screenSavedRevision=0,screenSavePromise=null;
 function notice(id,msg='',kind=''){const n=$(id);n.textContent=msg;n.className='notice '+kind;}
 function fmt(s){s=Math.max(0,Number(s)||0);const h=Math.floor(s/3600),m=Math.floor(s%3600/60),sec=s%60,p=n=>String(n).padStart(2,'0');return h?`${h}:${p(m)}:${p(sec)}`:`${p(m)}:${p(sec)}`;}
-document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{const tab=b.dataset.tab;document.querySelectorAll('.tab').forEach(t=>t.setAttribute('aria-selected',String(t===b)));document.querySelectorAll('.panel').forEach(p=>p.classList.toggle('active',p.id==='panel-'+tab));const localScroll=['timer','alarm','calendar','home'].includes(tab);document.documentElement.classList.toggle('list-scroll-mode',localScroll);document.body.classList.toggle('list-scroll-mode',localScroll);}));
+document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{const tab=b.dataset.tab;document.querySelectorAll('.tab').forEach(t=>t.setAttribute('aria-selected',String(t===b)));document.querySelectorAll('.panel').forEach(p=>p.classList.toggle('active',p.id==='panel-'+tab));const localScroll=['timer','alarm','calendar','home','radio'].includes(tab);document.documentElement.classList.toggle('list-scroll-mode',localScroll);document.body.classList.toggle('list-scroll-mode',localScroll);document.documentElement.classList.toggle('radio-scroll-mode',tab==='radio');document.body.classList.toggle('radio-scroll-mode',tab==='radio');}));
 for(const [i,d] of weekdays.entries()){$('days').insertAdjacentHTML('beforeend',`<label class="day"><input type="checkbox" value="${i}" checked>${d}</label>`);}
 async function refreshWindows(){try{const r=await call('windows_list');const selects=[$('timerWindow')];for(const s of selects){const old=s.value;s.innerHTML='<option value="">Не активировать окно</option>';for(const title of r.windows||[]){const m=title.match(/^(#\d+) — (.*)$/);const o=document.createElement('option');o.value=m?m[1]:title;o.textContent=title;s.append(o);}s.value=old;}}catch(e){notice('timerNotice',e.message,'error');}}
 async function refresh(){const request=++refreshSequence;try{const [t,a,c,s]=await Promise.all([call('state'),call('alarm_state'),call('calendar_state'),call('settings_state')]);if(request!==refreshSequence)return;timerState=t;renderTimer(t);const calendar=mergeCalendarStates(c,s?.calendar);renderAlarm(a,calendar);renderCalendar(calendar,a);renderSettings(s);$('globalStatus').textContent='Синхронизация с плагином активна';}catch(e){if(request===refreshSequence)$('globalStatus').textContent='Ожидание соединения с плагином';}}function renderTimer(s){$('timerReadout').textContent=s.running?fmt(s.remaining_seconds):'—';$('timerMeta').textContent=!s.running?'Таймер не запущен':`${s.paused?'На паузе':'Идёт'} · ${({playpause:'Медиа play/pause',sleep:'Спящий режим',shutdown:'Выключение'})[s.action]||s.action}${s.window?' · '+s.window:''}`;$('timerPause').textContent=s.paused?'Продолжить':'Пауза';}
@@ -167,6 +190,7 @@ function renderSettings(s){
     $('screenCommentary').checked=!!q.screen_commentary_enabled;
     $('screenIntervalMin').value=q.screen_interval_min||5;
     $('screenIntervalMax').value=q.screen_interval_max||90;
+    setScreenMonitor(q.screen_monitor||'primary');
   }
   const i=s.idle||{};
   $('idleStatus').innerHTML='<span class="dot '+(i.running?'on':'')+'"></span>'+(i.running?(i.warning?'Скоро будет выполнено действие':i.triggered?'Действие выполнено; ждём возвращения':'До действия '+fmt(i.remaining_seconds)):'Отслеживание выключено');
@@ -189,7 +213,8 @@ function saveScreenSettings(){
         const r=await call('screen_settings_save',{
           enabled:$('screenCommentary').checked,
           min_interval:Number($('screenIntervalMin').value)||5,
-          max_interval:Number($('screenIntervalMax').value)||90
+          max_interval:Number($('screenIntervalMax').value)||90,
+          monitor:$('screenMonitor').value
         });
         if(r.error)throw Error(r.error);
         screenSavedRevision=revision;
@@ -204,7 +229,23 @@ function saveScreenSettings(){
   })().finally(()=>{screenSavePromise=null;});
   return screenSavePromise;
 }
-for(const id of ['screenCommentary','screenIntervalMin','screenIntervalMax']){
+function setScreenMonitor(value){
+  const select=$('screenMonitor');
+  if(![...select.options].some(o=>o.value===value))select.add(new Option('Отключённый монитор: '+value,value));
+  select.value=value;
+}
+async function refreshScreenMonitors(){
+  const button=$('screenRefreshMonitors');button.disabled=true;
+  try{
+    const result=await call('screen_monitors');if(result.error)throw Error(result.error);
+    const value=$('screenMonitor').value;
+    const options=[new Option('Основной монитор','primary'),new Option('Все мониторы','all'),...(result.monitors||[]).map(m=>new Option(m.label,m.id))];
+    $('screenMonitor').replaceChildren(...options);setScreenMonitor(value);
+  }catch(e){notice('screenNotice',e.message,'error');}finally{button.disabled=false;}
+}
+$('screenRefreshMonitors').onclick=refreshScreenMonitors;
+refreshScreenMonitors();
+for(const id of ['screenCommentary','screenIntervalMin','screenIntervalMax','screenMonitor']){
   $(id).addEventListener('change',()=>{
     ++screenDraftRevision;
     saveScreenSettings();
@@ -333,5 +374,6 @@ $('saveSettings').onclick=async()=>{try{if(screenSavedRevision<screenDraftRevisi
 refreshWindows();document.documentElement.classList.add('list-scroll-mode');document.body.classList.add('list-scroll-mode');refresh();setInterval(refresh,1000);
 </script>
 <script src="features.js"></script>
+<script src="radio-schedule.js?v=2"></script>
 </body>
 </html>

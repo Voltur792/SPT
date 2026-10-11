@@ -1,12 +1,13 @@
 [project]
 name = "sleep_pause_timer"
-version = "1.1.2"
+version = "1.2.0"
 description = "An Astra plugin"
 requires-python = ">=3.10"
 dependencies = [
     "astra-plugin-sdk>=0.6,<0.7",
     "grpcio>=1.60.0",
     "protobuf>=4.25.0",
+    "Pillow>=11.3,<12",
 ]
 
 [project.optional-dependencies]
