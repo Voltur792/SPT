@@ -2,7 +2,7 @@
 
 Таймеры, будильники и радиоэфиры по расписанию для [Astra](https://github.com/mihailinl/AstraPlugins) от **Voltur**. Работает в Windows.
 
-[Скачать исходники ZIP — 1.2.0](https://github.com/Voltur792/SPT/archive/refs/tags/v1.2.0.zip) · [Страница релиза](https://github.com/Voltur792/SPT/releases/latest)
+[Скачать исходники ZIP — 1.2.1](https://github.com/Voltur792/SPT/archive/refs/tags/v1.2.1.zip) · [Страница релиза](https://github.com/Voltur792/SPT/releases/latest)
 
 ## Загрузка и установка из исходников
 
