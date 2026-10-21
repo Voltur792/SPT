@@ -16,12 +16,12 @@ jobs:
     timeout-minutes: 20
     env:
       ASTRA_MUSIC_NATIVE_PLAYER: '0'
-      AA_DATA_DIR: ${{ runner.temp }}/astra-platform-tests/assistant
-      ASTRA_MUSIC_DATA_DIR: ${{ runner.temp }}/astra-platform-tests/music
-      SPT_ALARM_STATE_DIR: ${{ runner.temp }}/astra-platform-tests/timer
-      SPT_INTEGRATION_DIR: ${{ runner.temp }}/astra-platform-tests/integrations
-      YSH_DATA_DIR: ${{ runner.temp }}/astra-platform-tests/home
-      YSH_COMMANDS_FILE: ${{ runner.temp }}/astra-platform-tests/commands.json
+      AA_DATA_DIR: ${{ github.workspace }}/.tmp-platform-tests/assistant
+      ASTRA_MUSIC_DATA_DIR: ${{ github.workspace }}/.tmp-platform-tests/music
+      SPT_ALARM_STATE_DIR: ${{ github.workspace }}/.tmp-platform-tests/timer
+      SPT_INTEGRATION_DIR: ${{ github.workspace }}/.tmp-platform-tests/integrations
+      YSH_DATA_DIR: ${{ github.workspace }}/.tmp-platform-tests/home
+      YSH_COMMANDS_FILE: ${{ github.workspace }}/.tmp-platform-tests/commands.json
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
