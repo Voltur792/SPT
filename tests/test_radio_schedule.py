@@ -43,7 +43,7 @@ def test_shift_starts_once_restores_and_stops_at_exact_end(tmp_path, service, mo
         now[0] = START
         await schedule.tick()
         assert schedule.active and schedule.rows[0]["result"] == "В эфире"
-        assert json.loads(schedule.path.read_text())["active"]["run_id"] == discord.active["run_id"]
+        assert json.loads(schedule.path.read_text(encoding="utf-8"))["active"]["run_id"] == discord.active["run_id"]
         assert discord.active["ends_at"] == int((START + timedelta(hours=2)).timestamp())
         assert discord.active["music"]["service"] == service and discord.active["every"] == 3
         await schedule.tick()

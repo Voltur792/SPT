@@ -423,7 +423,8 @@ def test_pause_and_cancel_without_timer_are_friendly():
         assert h.call_tool("cancel_timer").json == "Таймер не запущен"
 
 
-def test_list_windows_returns_numbered_titles():
+def test_list_windows_returns_numbered_titles(monkeypatch):
+    monkeypatch.setattr("src.plugin._visible_windows", lambda: [(1, "Player"), (2, "Browser")])
     with Harness(SleepPauseTimer()) as h:
         result = h.call_tool("list_windows")
         assert result.success, result.code
