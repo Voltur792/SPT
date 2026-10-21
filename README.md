@@ -1,5 +1,7 @@
 # Sleep Pause Timer — Таймер паузы
 
+> **Linux и macOS — экспериментальная поддержка.** Полная ручная проверка на этих ОС ещё не выполнена. Для macOS пока нет выпускаемого хоста Astra. Зависимости и ограничения: [PLATFORMS.md](PLATFORMS.md).
+
 Таймеры, будильники и радиоэфиры по расписанию для [Astra](https://github.com/mihailinl/AstraPlugins) от **Voltur**. Работает в Windows.
 
 [Скачать исходники ZIP — 1.2.1](https://github.com/Voltur792/SPT/archive/refs/tags/v1.2.1.zip) · [Страница релиза](https://github.com/Voltur792/SPT/releases/latest)

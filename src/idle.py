@@ -108,6 +108,10 @@ class IdleMonitor:
 
     @staticmethod
     def _idle_seconds() -> int:
+        import sys
+        if sys.platform != "win32":
+            from .posix_system import idle_seconds
+            return idle_seconds()
         user32, kernel32 = ctypes.windll.user32, ctypes.windll.kernel32
         info = LASTINPUTINFO()
         info.cbSize = ctypes.sizeof(LASTINPUTINFO)
@@ -119,6 +123,10 @@ class IdleMonitor:
     @staticmethod
     def _cursor_position() -> tuple[int, int]:
         """Return cursor screen coordinates, including negative multi-monitor space."""
+        import sys
+        if sys.platform != "win32":
+            from .posix_system import cursor_position
+            return cursor_position()
         class POINT(ctypes.Structure):
             _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
 

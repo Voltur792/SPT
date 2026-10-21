@@ -17,15 +17,14 @@ import ctypes
 import base64
 import json
 import os
+import sys
 import random
 import re
 import threading
 import time
 import uuid
 import tempfile
-import tkinter as tk
 from pathlib import Path
-from tkinter import filedialog
 from typing import Literal, Optional
 
 from .alarm import AlarmEngine, AlarmError
@@ -99,6 +98,9 @@ def _parse_clock_time(value: str) -> tuple[int, int]:
 
 
 def _foreground_window_title() -> str:
+    if sys.platform != "win32":
+        from .posix_system import foreground_title
+        return foreground_title()
     user32 = ctypes.windll.user32
     user32.GetForegroundWindow.restype = ctypes.c_void_p
     user32.GetWindowTextW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_int]
@@ -110,11 +112,14 @@ def _foreground_window_title() -> str:
 
 # ----------------- Окна: перечисление и активация (ctypes) -----------------
 
-WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+WNDENUMPROC = getattr(ctypes, "WINFUNCTYPE", ctypes.CFUNCTYPE)(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
 
 
 def _visible_windows() -> list[tuple[int, str]]:
     """Видимые окна верхнего уровня с непустыми заголовками."""
+    if sys.platform != "win32":
+        from .posix_system import windows
+        return windows()
     user32 = ctypes.windll.user32
     found: list[tuple[int, str]] = []
 
@@ -143,6 +148,9 @@ def _visible_windows() -> list[tuple[int, str]]:
 
 def press_media_play_pause() -> None:
     """Медиа-клавиша play/pause через keybd_event (замена pyautogui)."""
+    if sys.platform != "win32":
+        from .posix_system import media_pause
+        return media_pause()
     user32 = ctypes.windll.user32
     user32.keybd_event(VK_MEDIA_PLAY_PAUSE, 0, 0, 0)
     time.sleep(0.02)
@@ -151,6 +159,9 @@ def press_media_play_pause() -> None:
 
 def shutdown_pc() -> None:
     """Выключение ПК — как в оригинале (ExitWindowsEx)."""
+    if sys.platform != "win32":
+        from .posix_system import power
+        return power("shutdown")
     ctypes.windll.user32.ExitWindowsEx(EWX_SHUTDOWN_FORCE, 0xFFFFFFFF)
 
 
@@ -161,6 +172,9 @@ def sleep_pc() -> None:
     а не в kernel32 (вызов ctypes.windll.kernel32.SetSuspendState в оригинале
     падал с AttributeError и сон не срабатывал).
     """
+    if sys.platform != "win32":
+        from .posix_system import power
+        return power("sleep")
     ctypes.windll.powrprof.SetSuspendState(0, 0, 0)
 
 
@@ -242,6 +256,13 @@ class WindowManager:
         return [h for h, t in windows if needle in (t or "").casefold()]
 
     def _try_activate(self, hwnd, is_chromium: bool) -> tuple[bool, str]:
+        if sys.platform != "win32":
+            from .posix_system import window_action
+            try:
+                window_action(hwnd)
+                return True, "Системная активация окна"
+            except RuntimeError as exc:
+                return False, str(exc)
         user32 = ctypes.windll.user32
 
         # Метод A: «как при демонстрации экрана» — танец с HWND_TOPMOST
@@ -531,8 +552,8 @@ class SleepPauseTimer(Plugin):
 
     @staticmethod
     def _local_settings_path() -> Path:
-        base = os.environ.get("SPT_ALARM_STATE_DIR") or os.environ.get("APPDATA") or os.environ.get("LOCALAPPDATA") or str(Path.home())
-        return Path(base) / "sleep-pause-timer" / "settings.json"
+        from .alarm import default_state_path
+        return default_state_path().with_name("settings.json")
 
     @trigger("Завершение таймера: команда Astra", fields=[Field.text("command_key", "Метка команды", description="Та же метка, что указана в действии таймера")])
     def timer_command(self):
@@ -796,7 +817,7 @@ class SleepPauseTimer(Plugin):
 
     @tool(
         "Choose and save alarm sound / выбрать мелодию будильника. "
-        "Open a native Windows file picker and save the selected local audio "
+        "Open a native file picker and save the selected local audio "
         "file path. Use when the user asks to choose a local music file for the "
         "alarm. The user must select an existing audio file."
     )
@@ -813,6 +834,8 @@ class SleepPauseTimer(Plugin):
 
     @staticmethod
     def _pick_alarm_sound() -> str:
+        import tkinter as tk
+        from tkinter import filedialog
         root = tk.Tk()
         root.withdraw()
         try:
@@ -1021,7 +1044,7 @@ class SleepPauseTimer(Plugin):
         return {"message": "Календарный звонок остановлен" if was_playing else "Календарный звонок не звучит",
                 "state": self.calendar.state()}
 
-    @tool("Set the Windows inactivity threshold and start or restart monitoring. «Установи отслеживание бездействия на 40 минут» means minutes=40. action: playpause, shutdown, sleep, close_app, hotkey, astra_command, music, music_pause. action_params: close_app needs window, hotkey needs keys and optional window, astra_command needs command_key, music needs service, track_id and VK extra.owner_id. Without action use saved settings.")
+    @tool("Set the system inactivity threshold and start or restart monitoring. «Установи отслеживание бездействия на 40 минут» means minutes=40. action: playpause, shutdown, sleep, close_app, hotkey, astra_command, music, music_pause. action_params: close_app needs window, hotkey needs keys and optional window, astra_command needs command_key, music needs service, track_id and VK extra.owner_id. Without action use saved settings.")
     async def start_idle_monitor(self, minutes: int, action: str = "", window: str = "", action_params: Optional[dict] = None) -> dict:
         try:
             minutes = int(minutes)
@@ -1056,7 +1079,7 @@ class SleepPauseTimer(Plugin):
             raise RuntimeError(f"Не удалось сохранить настройки отслеживания: {exc}") from exc
         return {"message": f"Отслеживание бездействия запущено: {minutes} мин", "state": state}
 
-    @tool("Resume or restart Windows inactivity tracking from now. Keep the current duration and action, or use the saved inactivity settings if tracking is stopped. Use this when the user asks to resume/reset inactivity tracking in an Astra assistant conversation; Telegram can use it when its integration exposes plugin tools to the assistant.")
+    @tool("Resume or restart system inactivity tracking from now. Keep the current duration and action, or use the saved inactivity settings if tracking is stopped. Use this when the user asks to resume/reset inactivity tracking in an Astra assistant conversation; Telegram can use it when its integration exposes plugin tools to the assistant.")
     async def resume_idle_monitor(self) -> dict:
         current = self.idle.state()
         try:
@@ -1088,11 +1111,11 @@ class SleepPauseTimer(Plugin):
             raise BadArguments(str(exc)) from exc
         return {"message": f"Отслеживание бездействия возобновлено. Новый отсчёт: {minutes} мин", "state": state}
 
-    @tool("Stop tracking Windows inactivity.")
+    @tool("Stop tracking system inactivity.")
     async def stop_idle_monitor(self) -> dict:
         return self.idle.stop()
 
-    @tool("Report Windows inactivity tracking status and time until the configured action.")
+    @tool("Report system inactivity tracking status and time until the configured action.")
     async def idle_status(self) -> dict:
         return self.idle.state()
 
@@ -1573,7 +1596,7 @@ class SleepPauseTimer(Plugin):
             return {"error": "Неизвестный виджет"}
         return {"settings": self.desktop.state()[kind], "state": await self.state() if kind == "timer" else await self.alarm_state()}
 
-    @tool("Add or update a Smart Home schedule. entry contains kind=scenario/device, target_id, time=HH:MM, date=YYYY-MM-DD for once or days=[0..6] Monday..Sunday, name and enabled. Devices require capability_type, instance and value. Schedule uses local Windows time; Astra must be running.")
+    @tool("Add or update a Smart Home schedule. entry contains kind=scenario/device, target_id, time=HH:MM, date=YYYY-MM-DD for once or days=[0..6] Monday..Sunday, name and enabled. Devices require capability_type, instance and value. Schedule uses local system time; Astra must be running.")
     @ui_call
     async def home_schedule_save(self, entry: dict):
         try:

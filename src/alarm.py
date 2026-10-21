@@ -18,7 +18,9 @@ class AlarmError(ValueError):
 def default_state_path() -> Path:
     base = os.environ.get("SPT_ALARM_STATE_DIR")
     if not base:
-        base = os.environ.get("APPDATA") or os.environ.get("LOCALAPPDATA") or str(Path.home())
+        from .platform_support import user_data
+        legacy = Path.home() / "sleep-pause-timer"
+        base = os.environ.get("APPDATA") or os.environ.get("LOCALAPPDATA") or (str(Path.home()) if legacy.is_dir() else str(user_data()))
     return Path(base) / "sleep-pause-timer" / "alarm.json"
 
 
@@ -99,7 +101,16 @@ class WmpPlayer:
             # /play — начать воспроизведение сразу
             # /close — закрыть после завершения
             # Путь с пробелами/юникодом передаётся как есть
-            cmd = [self._wmp_path, "/play", "/close", path]
+            if sys.platform == "win32":
+                cmd = [self._wmp_path, "/play", "/close", path]
+            elif sys.platform == "darwin":
+                cmd = ["/usr/bin/afplay", str(Path(path).resolve())]
+            else:
+                import shutil
+                player = shutil.which("ffplay")
+                if not player:
+                    raise AlarmError("Для звука будильника в Linux установите FFmpeg (ffplay)")
+                cmd = [player, "-nodisp", "-autoexit", "-loglevel", "error", "-i", str(Path(path).resolve())]
             
             log.info("Starting wmplayer.exe: %s", " ".join(cmd))
             
@@ -131,6 +142,8 @@ class WmpPlayer:
                 ret = proc.poll()
                 if ret is not None:
                     log.info("WMP process exited with code %d", ret)
+                    if ret:
+                        raise AlarmError("Системный плеер не смог воспроизвести мелодию")
                     break
                     
             return True

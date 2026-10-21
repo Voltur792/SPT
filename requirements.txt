@@ -3,3 +3,6 @@ grpcio>=1.60.0
 grpcio-tools>=1.60.0
 protobuf>=4.25.0
 Pillow>=11.3,<12
+
+pywebview[qt]>=6,<7; sys_platform == "linux"
+pywebview>=6,<7; sys_platform == "darwin"

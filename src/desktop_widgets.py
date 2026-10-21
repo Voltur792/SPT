@@ -117,6 +117,23 @@ class DesktopWidgets:
 
 
 def run_window(kind):
+    if sys.platform != "win32":
+        from .portable_window import run_widget
+        from .integrations import integration_call
+        def snapshot():
+            return {**integration_call("timer", "desktop_snapshot", kind=kind), "kind": kind}
+        def hide():
+            return integration_call("timer", "desktop_set", kind=kind, settings={"enabled": False})
+        def command(name, timer_id, value):
+            if name == "hide":
+                return hide()
+            state = value.get("state", {})
+            if kind == "timer":
+                if not timer_id or state.get("id") != timer_id:
+                    raise ValueError("Таймер изменился. Обновите виджет.")
+                return integration_call("timer", "cancel" if name == "cancel" else "resume" if state.get("paused") else "pause", timer_id=timer_id)
+            return integration_call("timer", "alarm_cancel" if name == "cancel" else "alarm_stop")
+        return run_widget("Таймер паузы", snapshot, command, hide)
     import ctypes
     import queue
     import tkinter as tk

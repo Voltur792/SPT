@@ -64,7 +64,7 @@ def _enumerate(user32):
 
 def list_monitors():
     if sys.platform != "win32":
-        return []
+        return [{"id": "primary", "label": "Основной экран (системное разрешение на захват)", "primary": True}]
     with _physical_coordinates() as user32:
         monitors = _enumerate(user32)
     for index, monitor in enumerate(monitors, 1):
@@ -77,7 +77,7 @@ def capture_desktop(selection: str) -> bytes:
     """Return a JPEG, preserving physical/negative monitor coordinates."""
     validate_monitor(selection)
     if sys.platform != "win32":
-        raise RuntimeError("Захват экрана поддерживается только в Windows")
+        return _capture_posix(selection)
     from PIL import Image, ImageGrab
 
     with _physical_coordinates() as user32:
@@ -98,3 +98,31 @@ def capture_desktop(selection: str) -> bytes:
                 buffer = io.BytesIO()
                 rgb.save(buffer, "JPEG", quality=85)
                 return buffer.getvalue()
+
+
+def _capture_posix(selection):
+    from PIL import Image, ImageGrab
+    import os
+    import shutil
+    import subprocess
+    if selection not in ("primary", "all"):
+        raise RuntimeError("Выберите экран заново: идентификаторы мониторов Windows недоступны в этой ОС")
+    try:
+        if sys.platform == "linux" and (os.environ.get("WAYLAND_DISPLAY") or os.environ.get("XDG_SESSION_TYPE") == "wayland"):
+            grim = shutil.which("grim")
+            if not grim:
+                raise RuntimeError("Для снимков в Wayland нужен grim и поддержка screencopy композитором (Sway/Hyprland). В GNOME/KDE используйте выбор экрана браузером в VC-Discord; таймер работает без снимков.")
+            result = subprocess.run([grim, "-t", "png", "-"], capture_output=True, timeout=10, check=True)
+            image = Image.open(io.BytesIO(result.stdout))
+        else:
+            image = ImageGrab.grab(all_screens=selection == "all")
+        with image:
+            image.thumbnail((3840, 3840) if selection == "all" else (1920, 1920), Image.Resampling.LANCZOS)
+            with image.convert("RGB") as rgb:
+                buffer = io.BytesIO()
+                rgb.save(buffer, "JPEG", quality=85)
+                return buffer.getvalue()
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        raise RuntimeError("Не удалось сделать снимок. Проверьте разрешение на запись экрана в macOS или средство захвата текущего Linux-сеанса.") from exc

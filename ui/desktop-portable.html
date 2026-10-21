@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Виджет Astra</title>
+<style>
+:root{color-scheme:dark;--bg:#25243b;--fg:#fff;--muted:var(--fg);--accent:#c1a8ff;font:14px/1.45 system-ui,sans-serif;scrollbar-color:#918aaa #25243b}
+*{box-sizing:border-box}body{margin:0;padding:16px;background:var(--bg);color:var(--fg);user-select:text;overflow-wrap:anywhere}
+::selection{background:#c1a8ff;color:#201c32}h1{font-size:15px;margin:0 0 12px}#metric{font:600 32px/1.2 ui-monospace,monospace;font-variant-numeric:tabular-nums;margin:0 0 8px}
+dl{margin:0}dl div{display:grid;grid-template-columns:minmax(0,1fr) minmax(70px,.7fr);gap:12px;padding:8px 0}dt,dd{margin:0}dd{text-align:right;font-weight:600}
+progress{width:100%;height:6px;accent-color:var(--accent);grid-column:1/-1}#status{color:var(--muted);min-height:40px;margin:10px 0 0}#error{color:#ffd1d1;min-height:20px;margin:8px 0 0}
+nav{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}button{font:inherit;color:var(--fg);background:#46425f;border:1px solid #766e91;border-radius:8px;min-height:36px;padding:8px 12px;cursor:pointer}
+button:hover{background:#5a5278}button:active{background:#3c3655}button:focus-visible{outline:2px solid var(--accent);outline-offset:3px}button:disabled{opacity:.7;cursor:default}
+[hidden]{display:none!important}
+</style>
+<main>
+ <h1 id="title">Подключение…</h1>
+ <p id="metric" hidden>—</p>
+ <dl id="rows"></dl>
+ <p id="status" role="status">Ожидаю данные Astra</p>
+ <nav aria-label="Управление виджетом">
+  <button id="control" hidden>Пауза</button>
+  <button id="cancel" hidden>Отменить</button>
+  <button id="hide">Скрыть виджет</button>
+ </nav>
+ <p id="error" role="alert"></p>
+</main>
+<script>
+const $=id=>document.getElementById(id); let current={},busy=false;
+function render(value){
+ if(value.error){$('error').textContent=value.error;return;}
+ $('error').textContent='';current=value;
+ const s=value.settings||{},a=value.state||{};
+ $('title').textContent=s.title||(value.kind==='alarm'?'Будильник':a.name||'Таймер');
+ for(const [name,key] of [['--bg','background'],['--fg','foreground'],['--accent','accent']])if(/^#[0-9a-f]{6}$/i.test(s[key]||''))document.documentElement.style.setProperty(name,s[key]);
+ if(value.background)document.body.style.backgroundImage=`linear-gradient(#25243bcc,#25243bcc),url("${value.background}")`;
+ const timer=value.kind==='timer',alarm=value.kind==='alarm';
+ $('metric').hidden=!(timer||alarm);
+ $('metric').textContent=timer?(a.running?a.remaining:'—'):(a.playing?'Звонит':a.scheduled?a.next_time:'—');
+ $('status').textContent=timer?(a.running?(a.paused?'На паузе':'Идёт отсчёт'):'Таймер не запущен'):alarm?(a.scheduled?'Ближайший будильник':'Будильник не установлен'):(value.device_error?'Нет связи с Яндексом · показания устарели':value.updated?'Обновлено '+value.updated:'Показатели компьютера');
+ $('control').hidden=!(timer||alarm);$('cancel').hidden=!(timer||alarm);
+ $('control').textContent=timer?(a.paused?'Продолжить':'Пауза'):'Остановить звонок';
+ $('control').disabled=busy||(timer?!a.running:!a.playing);$('cancel').disabled=busy||(timer?!a.running:!a.scheduled);
+ const rows=(value.rows||[]).map(r=>{const wrap=document.createElement('div'),label=document.createElement('dt'),text=document.createElement('dd');label.textContent=r.label;text.textContent=r.text+(r.stale?' *':'');wrap.append(label,text);if(s.bars&&Number.isFinite(r.progress)){const p=document.createElement('progress');p.max=100;p.value=r.progress;p.setAttribute('aria-label',r.label);wrap.append(p);}return wrap;});$('rows').replaceChildren(...rows);
+}
+async function refresh(){if(!busy){try{const value=await window.pywebview.api.snapshot();if(!value.closed)render(value);}catch(e){$('error').textContent='Связь с окном прервалась. Откройте виджет заново.';}}setTimeout(refresh,1000);}
+for(const name of ['control','cancel','hide'])$(name).onclick=async()=>{if(busy)return;busy=true;for(const b of document.querySelectorAll('button'))b.disabled=true;try{await window.pywebview.api.command(name,current.state?.id||'');const value=await window.pywebview.api.snapshot();if(!value.closed)render(value);}catch(e){$('error').textContent='Не удалось выполнить действие. Повторите попытку.';}finally{const message=$('error').textContent;busy=false;$('hide').disabled=false;if(current.settings)render(current);$('error').textContent=message;}};
+window.addEventListener('pywebviewready',refresh,{once:true});
+</script>
+</html>

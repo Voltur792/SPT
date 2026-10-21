@@ -15,7 +15,8 @@ from urllib.request import Request, ProxyHandler, build_opener
 
 def registry_dir():
     base = os.environ.get("SPT_INTEGRATION_DIR")
-    return Path(base) if base else Path(os.environ.get("APPDATA") or Path.home()) / "sleep-pause-timer" / "integrations"
+    from .platform_support import integration_dir
+    return Path(base) if base else integration_dir()
 
 
 class IntegrationServer:

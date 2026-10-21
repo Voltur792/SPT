@@ -65,6 +65,23 @@ def decode_music(value):
 
 
 def perform_native(action, params, windows):
+    import sys
+    if sys.platform != "win32":
+        from .posix_system import hotkey, window_action
+        if action == "close_app":
+            target = windows.resolve_target(params["window"])
+            matches = windows._find_windows(target, target.casefold())
+            if len(matches) != 1:
+                raise RuntimeError("Укажите точный заголовок одного окна")
+            window_action(matches[0], close=True)
+            return "Приложению отправлен запрос закрытия"
+        parse_hotkey(params["keys"])
+        if params.get("window"):
+            ok, reason = windows.activate(params["window"])
+            if not ok:
+                raise RuntimeError(reason)
+        hotkey(params["keys"])
+        return "Сочетание клавиш отправлено"
     user32 = ctypes.windll.user32
     if action == "close_app":
         target = windows.resolve_target(params["window"])
