@@ -11,7 +11,6 @@ servicer, so a tool that is declared but not routed fails here.
 """
 
 import asyncio
-import base64
 import json
 import sys
 from pathlib import Path
@@ -453,9 +452,10 @@ def test_widget_contribution_is_a_transparent_home_widget():
     settings_page = next(c for c in contributions if c.id == "timer-settings-page")
     assert settings_page.slot == "page.custom"
     assert settings_page.url == "settings-v2.html"
-    assert 'data:image/png;base64,' in settings_page.icon_svg
-    icon_payload = settings_page.icon_svg.split('base64,', 1)[1].split('"', 1)[0]
-    assert base64.b64decode(icon_payload)[:8] == b"\x89PNG\r\n\x1a\n"
+    # Astra 0.2.7 draws only vector tab icons; an embedded <image> stays blank.
+    assert settings_page.icon_svg.startswith("<svg")
+    assert "currentColor" in settings_page.icon_svg
+    assert "<image" not in settings_page.icon_svg
 
 
 def test_ui_calls_report_engine_state():

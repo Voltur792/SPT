@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import asyncio
 import ctypes
-import base64
 import json
 import os
 import sys
@@ -1634,16 +1633,14 @@ class SleepPauseTimer(Plugin):
         self._ensure_radio_task()
         # Строим вручную, а не через @ui_slot: нужен transparent=True
         # (иначе Astra зальёт iframe непрозрачным фоном — «чёрный фон виджета»).
-        icon_path = Path(__file__).resolve().parent.parent / "ui" / "app-icon.png"
-        try:
-            icon_data = base64.b64encode(icon_path.read_bytes()).decode("ascii")
-            page_icon = (
-                '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">'
-                f'<image width="512" height="512" href="data:image/png;base64,{icon_data}"/>'
-                '</svg>'
-            )
-        except OSError:
-            page_icon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l3 2M9 2h6M12 2v3"/></svg>'
+        # Иконка вкладки — только векторный SVG с currentColor: Astra 0.2.7
+        # не рисует растр, вложенный через <image>, и вкладка остаётся без значка.
+        page_icon = (
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" '
+            'stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">'
+            '<circle cx="12" cy="13" r="7.5"/>'
+            '<path d="M10 10.5v5M14 10.5v5M3.5 6.5l3-3M20.5 6.5l-3-3M7 19l-1.5 2M17 19l1.5 2"/></svg>'
+        )
         return [
             UiContribution(
                 id="timer-widget",
