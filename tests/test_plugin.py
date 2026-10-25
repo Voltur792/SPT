@@ -433,22 +433,23 @@ def test_list_windows_returns_numbered_titles(monkeypatch):
             assert " — " in entry
 
 
-def test_widget_contribution_is_a_transparent_home_widget():
+def test_widgets_are_compact_desktop_cards():
     plugin = SleepPauseTimer()
     contributions = asyncio.run(plugin.get_ui_contributions())
     assert len(contributions) == 3
     timer_widget = next(c for c in contributions if c.id == "timer-widget")
     alarm_widget = next(c for c in contributions if c.id == "alarm-widget")
-    assert timer_widget.slot == "home.widgets"
-    assert timer_widget.url == "widget.html"
-    assert timer_widget.transparent is True
-    assert timer_widget.pointer_events is True
-    assert timer_widget.height > 0
-    assert alarm_widget.slot == "home.widgets"
-    assert alarm_widget.url == "alarm-widget.html"
-    assert alarm_widget.transparent is True
-    assert alarm_widget.pointer_events is True
-    assert alarm_widget.height > 0
+    for widget, url in ((timer_widget, "widget.html"), (alarm_widget, "alarm-widget.html")):
+        assert widget.slot == "desktop.widget"
+        assert widget.url == url
+        assert widget.transparent is True
+        assert widget.pointer_events is True
+        # Astra sizes the card from the format; legacy home.widgets got 4x6 cells.
+        (fmt,) = widget.desktop_widget.formats
+        assert (fmt.id, fmt.url) == ("card", url)
+        assert (fmt.default_w, fmt.default_h, fmt.min_h, fmt.max_h) == (4, 2, 2, 2)
+        assert fmt.min_w <= fmt.default_w <= fmt.max_w
+        widget.to_proto()
     settings_page = next(c for c in contributions if c.id == "timer-settings-page")
     assert settings_page.slot == "page.custom"
     assert settings_page.url == "settings-v2.html"

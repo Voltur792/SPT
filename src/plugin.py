@@ -38,8 +38,10 @@ from .screen_capture import capture_desktop, list_monitors, validate_monitor
 from .desktop_widgets import DesktopWidgets
 from astra_plugin_sdk import (
     BadArguments,
+    DesktopWidget,
     Plugin,
     UiContribution,
+    WidgetFormat,
     Unavailable,
     ui_call,
     tool,
@@ -1642,22 +1644,20 @@ class SleepPauseTimer(Plugin):
             '<path d="M10 10.5v5M14 10.5v5M3.5 6.5l3-3M20.5 6.5l-3-3M7 19l-1.5 2M17 19l1.5 2"/></svg>'
         )
         return [
-            UiContribution(
-                id="timer-widget",
-                slot="home.widgets",
-                url="widget.html",
-                height=120,
-                transparent=True,
-                pointer_events=True,
-            ),
-            UiContribution(
-                id="alarm-widget",
-                slot="home.widgets",
-                url="alarm-widget.html",
-                height=120,
-                transparent=True,
-                pointer_events=True,
-            ),
+            # Карточку рисует сама Astra (слот desktop.widget). Старый слот
+            # home.widgets Astra 0.2.7 показывала плиткой 4×6 клеток — под
+            # виджетом высотой 120 px оставалась пустая подложка. Формат «card»
+            # и прежние id сохраняют уже размещённые плитки; высота — ровно 2 клетки.
+            UiContribution.widget("timer-widget", "Таймер паузы", DesktopWidget(formats=[
+                WidgetFormat(id="card", label="Карточка", url="widget.html",
+                             default_w=4, default_h=2, min_w=3, min_h=2, max_w=8, max_h=2,
+                             min_pixel_width=220, min_pixel_height=110),
+            ])),
+            UiContribution.widget("alarm-widget", "Будильник", DesktopWidget(formats=[
+                WidgetFormat(id="card", label="Карточка", url="alarm-widget.html",
+                             default_w=4, default_h=2, min_w=3, min_h=2, max_w=8, max_h=2,
+                             min_pixel_width=220, min_pixel_height=110),
+            ])),
             UiContribution(
                 id="timer-settings-page",
                 slot="page.custom",

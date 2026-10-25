@@ -196,6 +196,9 @@
     .btn.primary:hover { background: var(--action-hover); border-color: rgba(215,200,255,.7); }
 
     .hidden { display: none; }
+      /* В карточке desktop.widget фон, рамку и тень рисует сама Astra. */
+    html.host-card .card, html.host-card .activeCard, html.host-card .idle { border: 0; background: transparent; box-shadow: none; }
+    html.host-card .card::before, html.host-card .activeCard::before, html.host-card .idle::before { display: none; }
   </style>
 
 </head>
@@ -251,6 +254,7 @@
   <div class="idle" id="idle"><span>Будильник не установлен — попросите Астру поставить будильник</span></div>
 
   <script>
+    if (window.astra && window.astra.widget) document.documentElement.classList.add('host-card');
     const call = (method, params) => {
       const api = window.astra || window.__astraBridge || null;
       const fn = api && (api.callBackend || api.call);
